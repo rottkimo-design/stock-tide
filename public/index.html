@@ -29,9 +29,14 @@
 
   /* 自選股 */
   #watch { display: none; padding: 16px 20px; }
-  .watch-bar { display: flex; gap: 8px; margin-bottom: 16px; }
+  .watch-bar { display: flex; gap: 8px; margin-bottom: 16px; position: relative; }
   .watch-bar input { background: var(--panel); border: 1px solid var(--border); color: var(--text);
     border-radius: 8px; padding: 8px 12px; font-size: 14px; width: 220px; }
+  #suggest { position: absolute; top: 40px; left: 0; width: 246px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 8px; z-index: 10; overflow: hidden; display: none; }
+  #suggest div { padding: 8px 12px; font-size: 14px; cursor: pointer; }
+  #suggest div:hover, #suggest div.sel { background: #1c2a3a; }
+  #suggest small { color: var(--muted); margin-left: 8px; }
   .watch-bar button { background: #1c2a3a; border: 1px solid #58a6ff; color: var(--text);
     border-radius: 8px; padding: 8px 16px; cursor: pointer; }
   #cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
@@ -67,8 +72,9 @@
 <div id="chart"></div>
 <div id="watch">
   <div class="watch-bar">
-    <input id="watch-input" placeholder="輸入上市股票代號，如 2330" maxlength="4">
+    <input id="watch-input" placeholder="代號或名稱，如 2330 / 台積電" autocomplete="off">
     <button id="watch-add">加入</button>
+    <div id="suggest"></div>
   </div>
   <div id="cards"></div>
 </div>
@@ -303,8 +309,11 @@ function sparkSVG(spark, prev, color) {
     <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
 }
 
+let stocksCache = null;  // 最新全市場報價，也是代號↔名稱對照表
+
 async function renderWatch() {
-  const data = await fetchJSON("tw_stocks");
+  let data = await fetchJSON("tw_stocks");
+  if (data) stocksCache = data; else data = stocksCache;
   const cards = document.getElementById("cards");
   if (!data) {
     document.getElementById("meta").textContent = "尚無個股資料（請先啟動盤中 runner）";
@@ -342,18 +351,59 @@ async function renderWatch() {
   }));
 }
 
-function addWatch() {
-  const input = document.getElementById("watch-input");
-  const code = input.value.trim();
-  if (!/^\d{4}$/.test(code)) { input.value = ""; return; }
+// 代號或名稱 → [code, name] 候選清單（代號前綴或名稱包含）
+function matchStocks(q) {
+  if (!q || !stocksCache) return [];
+  const out = [];
+  for (const [code, s] of Object.entries(stocksCache.stocks)) {
+    if (code.startsWith(q) || s.n.includes(q)) {
+      out.push([code, s.n]);
+      if (out.length >= 8) break;
+    }
+  }
+  return out;
+}
+
+function addCode(code) {
   const wl = getWL();
   if (!wl.includes(code)) { wl.push(code); setWL(wl); }
+  const input = document.getElementById("watch-input");
   input.value = "";
+  hideSuggest();
   renderWatch();
 }
+
+function addWatch() {
+  const q = document.getElementById("watch-input").value.trim();
+  if (!q) return;
+  // 純 4 碼代號直接收；其餘用名稱/前綴解析，取第一個候選
+  if (/^\d{4}$/.test(q)) return addCode(q);
+  const m = matchStocks(q);
+  const exact = m.find(([, n]) => n === q);
+  if (exact || m.length) addCode((exact || m[0])[0]);
+}
+
+const suggestEl = document.getElementById("suggest");
+function hideSuggest() { suggestEl.style.display = "none"; }
+
+function showSuggest() {
+  const q = document.getElementById("watch-input").value.trim();
+  const m = matchStocks(q);
+  if (!m.length) return hideSuggest();
+  suggestEl.innerHTML = m.map(([code, n]) =>
+    `<div data-code="${code}">${n}<small>${code}</small></div>`).join("");
+  suggestEl.style.display = "block";
+  suggestEl.querySelectorAll("div").forEach(el =>
+    el.addEventListener("mousedown", e => { e.preventDefault(); addCode(el.dataset.code); }));
+}
+
 document.getElementById("watch-add").addEventListener("click", addWatch);
-document.getElementById("watch-input").addEventListener("keydown",
-  e => { if (e.key === "Enter") addWatch(); });
+document.getElementById("watch-input").addEventListener("input", showSuggest);
+document.getElementById("watch-input").addEventListener("blur", () => setTimeout(hideSuggest, 150));
+document.getElementById("watch-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") addWatch();
+  if (e.key === "Escape") hideSuggest();
+});
 
 document.querySelectorAll(".tab").forEach(btn => {
   btn.addEventListener("click", () => {
