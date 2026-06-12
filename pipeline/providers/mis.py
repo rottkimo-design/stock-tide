@@ -22,6 +22,7 @@ class MisProvider:
     def __init__(self):
         self._session = requests.Session()
         self._session.headers.update(HEADERS)
+        self._last_price: dict[str, float] = {}
         # 先踩一次首頁拿 session cookie，否則 API 可能回空
         try:
             self._session.get("https://mis.twse.com.tw/stock/index.jsp", timeout=15)
@@ -66,12 +67,17 @@ class MisProvider:
                 time.sleep(SLEEP)
                 continue
             for s in data.get("msgArray", []):
+                code = s["c"]
+                # MIS 偶爾回 z='-'（瞬間缺值）。權重大的股票若 fallback 到
+                # 昨收會讓板塊加權漲跌瞬間歸零（軌跡出現大來回假訊號），
+                # 因此缺值時沿用上一輪價格，完全沒有已知價才跳過。
                 price = _num(s.get("z")) or _num(s.get("b", "").split("_")[0]) \
-                    or _num(s.get("y"))
+                    or self._last_price.get(code)
                 prev = _num(s.get("y"))
                 vol = _num(s.get("v"))  # 累計成交量（張）
                 if not price or not prev or vol is None:
                     continue
+                self._last_price[code] = price
                 rows.append({
                     "code": s["c"],
                     "name": s.get("n", s["c"]),
