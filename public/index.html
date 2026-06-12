@@ -49,6 +49,7 @@
   .wl-tab.active { color: var(--text); border-color: #58a6ff; background: #1c2a3a; }
   .wl-tab .del { color: var(--muted); cursor: pointer; font-size: 11px; }
   .wl-tab .del:hover { color: #f85149; }
+  .wl-tab.dragover { color: var(--text); border-color: #58a6ff; background: #1c2a3a; transform: scale(1.08); }
   .card .rm { position: absolute; top: 8px; right: 12px; color: var(--muted); cursor: pointer; background: none; border: none; font-size: 16px; }
   .card h3 { font-size: 15px; margin-bottom: 6px; }
   .card h3 small { color: var(--muted); font-weight: normal; margin-left: 6px; }
@@ -466,9 +467,36 @@ function renderTabs(w) {
   }).join("") + `<button class="wl-tab" data-add>＋ 新分組</button>`;
 
   const bar = document.getElementById("wl-tabs");
-  bar.querySelectorAll("[data-g]").forEach(b => b.addEventListener("click", () => {
-    const w2 = loadWL(); w2.active = b.dataset.g; saveWL(w2); renderWatch();
-  }));
+  bar.querySelectorAll("[data-g]").forEach(b => {
+    b.addEventListener("click", () => {
+      const w2 = loadWL(); w2.active = b.dataset.g; saveWL(w2); renderWatch();
+    });
+    if (b.dataset.g === ALL) return;  // 拖到「全部」沒有意義
+    b.addEventListener("dragover", e => {
+      if (!dragCode) return;
+      e.preventDefault();
+      b.classList.add("dragover");
+    });
+    b.addEventListener("dragleave", () => b.classList.remove("dragover"));
+    b.addEventListener("drop", e => {
+      e.preventDefault();
+      b.classList.remove("dragover");
+      if (!dragCode) return;
+      const code = dragCode;
+      dragCode = null;
+      const w2 = loadWL();
+      const tg = w2.groups.find(g => g.name === b.dataset.g);
+      if (!tg) return;
+      if (!tg.codes.includes(code)) tg.codes.push(code);
+      // 從分組頁拖到別的分組 = 搬移；從「全部」拖過去 = 加入
+      if (w2.active !== ALL && w2.active !== tg.name) {
+        const cur = w2.groups.find(g => g.name === w2.active);
+        if (cur) cur.codes = cur.codes.filter(c => c !== code);
+      }
+      saveWL(w2);
+      renderWatch();
+    });
+  });
   bar.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", e => {
     e.stopPropagation();
     const name = b.dataset.del;
