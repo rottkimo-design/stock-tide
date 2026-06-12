@@ -52,7 +52,69 @@ def ref_snapshot(history: list[dict], now: datetime) -> dict | None:
     return min(candidates, key=lambda h: abs(h["ts"] - target))["amounts"]
 
 
-def run_cycle(mis: MisProvider, industry: dict[str, str]) -> bool:
+def load_state(day: str) -> dict:
+    """跨 cycle 狀態（大盤走勢點位、個股 spark），重啟不丟。"""
+    f = HIST_DIR / f"state_{day}.json"
+    if f.exists():
+        return json.loads(f.read_text(encoding="utf-8"))
+    return {"index_points": [], "spark": {}}
+
+
+def save_state(day: str, state: dict):
+    HIST_DIR.mkdir(parents=True, exist_ok=True)
+    (HIST_DIR / f"state_{day}.json").write_text(
+        json.dumps(state), encoding="utf-8")
+
+
+def write_index_json(now: datetime, quote: dict | None, state: dict):
+    if quote:
+        pts = state["index_points"]
+        t = f"{now:%H:%M}"
+        if not pts or pts[-1][0] != t:
+            pts.append([t, round(quote["last"], 2)])
+        state["last_quote"] = quote
+    quote = state.get("last_quote")
+    if not quote:
+        return
+    (DATA_DIR / "tw_index.json").write_text(json.dumps({
+        "market": "tw-index",
+        "title": "台股加權指數",
+        "dataDate": f"{now:%Y-%m-%d}",
+        "prevClose": quote["prev_close"],
+        "open": quote.get("open"), "high": quote.get("high"),
+        "low": quote.get("low"), "last": quote["last"],
+        "chg": round(quote["chg"], 2),
+        "points": state["index_points"],
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }, ensure_ascii=False), encoding="utf-8")
+
+
+def write_stocks_json(now: datetime, snap, state: dict):
+    """全市場個股即時報價 + 走勢 spark（自選股監控用）。"""
+    spark = state["spark"]
+    stocks = {}
+    for r in snap.itertuples():
+        sp = spark.setdefault(r.code, [])
+        sp.append(round(r.price, 2))
+        if len(sp) > 400:
+            del sp[:len(sp) - 400]
+        stocks[r.code] = {
+            "n": r.name, "z": r.price, "y": r.prev_close,
+            "o": r.open, "h": r.high, "l": r.low,
+            "chg": round((r.price / r.prev_close - 1) * 100, 2),
+            "v": round(r.acc_shares / 1000),          # 張
+            "a": round(r.acc_shares * r.price / 1e8, 1),  # 億（近似）
+            "spark": sp[::5][-72:] + ([sp[-1]] if len(sp) % 5 != 1 else []),
+        }
+    (DATA_DIR / "tw_stocks.json").write_text(json.dumps({
+        "dataDate": f"{now:%Y-%m-%d %H:%M}",
+        "stocks": stocks,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }, ensure_ascii=False), encoding="utf-8")
+
+
+def run_cycle(mis: MisProvider, industry: dict[str, str],
+              state: dict) -> bool:
     now = datetime.now(TPE)
     day = f"{now:%Y%m%d}"
 
@@ -63,9 +125,11 @@ def run_cycle(mis: MisProvider, industry: dict[str, str]) -> bool:
     snap["sector"] = snap["code"].map(industry)
     snap = snap.dropna(subset=["sector"])
 
+    index_quote = mis.fetch_index_quote()
     history = load_history(day)
     sectors, market_chg = compute_intraday(
-        snap, ref_snapshot(history, now), mis.fetch_index())
+        snap, ref_snapshot(history, now),
+        index_quote["chg"] if index_quote else None)
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     (DATA_DIR / "tw_intraday.json").write_text(json.dumps({
@@ -81,6 +145,10 @@ def run_cycle(mis: MisProvider, industry: dict[str, str]) -> bool:
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }, ensure_ascii=False), encoding="utf-8")
 
+    write_index_json(now, index_quote, state)
+    write_stocks_json(now, snap, state)
+    save_state(day, state)
+
     HIST_DIR.mkdir(parents=True, exist_ok=True)
     with open(HIST_DIR / f"{day}.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps({"ts": now.timestamp(),
@@ -95,9 +163,10 @@ def main():
     print("載入產業別對照表...")
     industry = TwseProvider()._industry_map()
     mis = MisProvider()
+    state = load_state(f"{datetime.now(TPE):%Y%m%d}")
 
     if once:
-        run_cycle(mis, industry)
+        run_cycle(mis, industry, state)
         return
 
     print("盤中模式啟動（開盤時間 09:00–13:35 每分鐘更新）")
@@ -106,7 +175,7 @@ def main():
         if market_open(now):
             start = time.time()
             try:
-                run_cycle(mis, industry)
+                run_cycle(mis, industry, state)
             except Exception as e:
                 print(f"[{now:%H:%M}] 失敗：{e}")
             time.sleep(max(5, CYCLE - (time.time() - start)))

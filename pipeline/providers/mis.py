@@ -30,11 +30,22 @@ class MisProvider:
 
     def fetch_index(self) -> float | None:
         """加權指數當日漲跌幅（%），當作「大盤」基準。"""
+        q = self.fetch_index_quote()
+        return q["chg"] if q else None
+
+    def fetch_index_quote(self) -> dict | None:
+        """加權指數即時報價：last/prev_close/open/high/low/chg。"""
         url = ("https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
                "?ex_ch=tse_t00.tw&json=1&delay=0")
         try:
             m = self._session.get(url, timeout=15).json()["msgArray"][0]
-            return (float(m["z"]) / float(m["y"]) - 1) * 100
+            z, y = float(m["z"]), float(m["y"])
+            return {
+                "last": z, "prev_close": y,
+                "open": _num(m.get("o")), "high": _num(m.get("h")),
+                "low": _num(m.get("l")),
+                "chg": (z / y - 1) * 100,
+            }
         except Exception:
             return None
 
@@ -67,6 +78,9 @@ class MisProvider:
                     "price": price,
                     "prev_close": prev,
                     "acc_shares": vol * 1000,
+                    "open": _num(s.get("o")),
+                    "high": _num(s.get("h")),
+                    "low": _num(s.get("l")),
                 })
             time.sleep(SLEEP)
         return pd.DataFrame(rows)

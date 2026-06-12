@@ -25,6 +25,25 @@
   .lg-watching::before { color: var(--watching); } .lg-ebbing::before { color: var(--ebbing); }
   #chart { width: 100%; height: calc(100vh - 110px); min-height: 480px; }
   /* 台股慣例：紅=漲潮(流入) 綠=退潮(流出) */
+  .hint { color: var(--muted); font-size: 12px; padding: 0 20px 8px; }
+
+  /* 自選股 */
+  #watch { display: none; padding: 16px 20px; }
+  .watch-bar { display: flex; gap: 8px; margin-bottom: 16px; }
+  .watch-bar input { background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 8px 12px; font-size: 14px; width: 220px; }
+  .watch-bar button { background: #1c2a3a; border: 1px solid #58a6ff; color: var(--text);
+    border-radius: 8px; padding: 8px 16px; cursor: pointer; }
+  #cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; position: relative; }
+  .card .rm { position: absolute; top: 8px; right: 12px; color: var(--muted); cursor: pointer; background: none; border: none; font-size: 16px; }
+  .card h3 { font-size: 15px; margin-bottom: 6px; }
+  .card h3 small { color: var(--muted); font-weight: normal; margin-left: 6px; }
+  .price { font-size: 26px; font-weight: 700; }
+  .price small { font-size: 14px; margin-left: 8px; }
+  .up { color: var(--rising); } .down { color: var(--ebbing); } .flat { color: var(--text); }
+  .ohlc { display: flex; gap: 14px; color: var(--muted); font-size: 12px; margin: 8px 0 4px; flex-wrap: wrap; }
+  .ohlc b { color: var(--text); font-weight: normal; }
 </style>
 </head>
 <body>
@@ -32,17 +51,27 @@
   <h1>🌊 Stock Tide</h1>
   <div class="tabs">
     <button class="tab active" data-market="tw">台股</button>
+    <button class="tab" data-market="index">大盤指數</button>
     <button class="tab" data-market="us">美股</button>
+    <button class="tab" data-market="watch">自選股</button>
   </div>
   <div class="meta" id="meta"></div>
 </header>
-<div class="legend">
+<div class="legend" id="legend">
   <span class="lg-rising">漲潮（加速流入）</span>
   <span class="lg-rotating">輪動（流入放緩）</span>
   <span class="lg-watching">觀望（流出趨緩）</span>
   <span class="lg-ebbing">退潮（持續流出）</span>
 </div>
+<div class="hint" id="hint" style="display:none">滾輪縮放、拖曳平移</div>
 <div id="chart"></div>
+<div id="watch">
+  <div class="watch-bar">
+    <input id="watch-input" placeholder="輸入上市股票代號，如 2330" maxlength="4">
+    <button id="watch-add">加入</button>
+  </div>
+  <div id="cards"></div>
+</div>
 
 <script>
 const COLORS = { rising: "#f85149", rotating: "#d29922", watching: "#58a6ff", ebbing: "#3fb950" };
@@ -70,10 +99,35 @@ async function fetchJSON(name) {
 const isFresh = d => d?.generatedAt &&
   (Date.now() - new Date(d.generatedAt).getTime()) < 10 * 60 * 1000;
 
+function showView(market) {
+  const rotation = market === "tw" || market === "us";
+  document.getElementById("legend").style.display = rotation ? "flex" : "none";
+  document.getElementById("hint").style.display = market === "watch" ? "none" : "block";
+  document.getElementById("chart").style.display = market === "watch" ? "none" : "block";
+  document.getElementById("watch").style.display = market === "watch" ? "block" : "none";
+  if (market !== "watch") chart.resize();
+}
+
 async function load(market) {
   clearInterval(refreshTimer);
   refreshTimer = null;
+  showView(market);
 
+  if (market === "index") {
+    const d = await fetchJSON("tw_index");
+    if (!d) { document.getElementById("meta").textContent = "尚無大盤資料（請先啟動盤中 runner）"; return; }
+    renderIndex(d);
+    refreshTimer = setInterval(async () => {
+      const x = await fetchJSON("tw_index");
+      if (x) renderIndex(x);
+    }, 60 * 1000);
+    return;
+  }
+  if (market === "watch") {
+    await renderWatch();
+    refreshTimer = setInterval(renderWatch, 60 * 1000);
+    return;
+  }
   if (market === "tw") {
     // 盤中價量版 10 分鐘內有更新 → 即時模式；否則回盤後法人版
     const intraday = await fetchJSON("tw_intraday");
@@ -118,6 +172,10 @@ function render(d) {
   chart.setOption({
     backgroundColor: "transparent",
     grid: { left: 60, right: 30, top: 40, bottom: 50 },
+    dataZoom: [
+      { type: "inside", xAxisIndex: 0, filterMode: "none" },
+      { type: "inside", yAxisIndex: 0, filterMode: "none" },
+    ],
     xAxis: {
       name: d.axisX + (d.unit ? `（${d.unit}）` : ""), nameLocation: "middle", nameGap: 28,
       type: "value", scale: true,
@@ -172,6 +230,130 @@ function render(d) {
     }]),
   }, true);
 }
+
+// ---------- 大盤指數 ----------
+function renderIndex(d) {
+  const up = d.chg >= 0;
+  const color = up ? "#f85149" : "#3fb950";
+  const live = isFresh(d) ? "　🔴 即時" : "";
+  document.getElementById("meta").textContent =
+    `${d.title}｜${d.dataDate}｜${d.last.toLocaleString()}（${up ? "+" : ""}${d.chg}%）${live}`;
+
+  chart.setOption({
+    backgroundColor: "transparent",
+    grid: { left: 70, right: 30, top: 30, bottom: 50 },
+    dataZoom: [{ type: "inside", xAxisIndex: 0 }],
+    xAxis: {
+      type: "category", data: d.points.map(p => p[0]),
+      axisLine: { lineStyle: { color: "#484f58" } },
+      axisLabel: { color: "#8b949e" }, name: "", splitLine: { show: false },
+    },
+    yAxis: (() => {
+      const vals = d.points.map(p => p[1]).concat(d.prevClose);
+      const lo = Math.min(...vals), hi = Math.max(...vals);
+      const pad = Math.max((hi - lo) * 0.15, hi * 0.001);
+      return {
+        type: "value", name: "",
+        min: Math.floor(lo - pad), max: Math.ceil(hi + pad),
+        axisLine: { lineStyle: { color: "#484f58" } },
+        splitLine: { lineStyle: { color: "#21262d" } },
+        axisLabel: { color: "#8b949e", formatter: v => v.toLocaleString() },
+      };
+    })(),
+    tooltip: {
+      trigger: "axis",
+      backgroundColor: "#161b22", borderColor: "#30363d",
+      textStyle: { color: "#e6edf3", fontSize: 12 },
+      formatter: ps => {
+        const v = ps[0].value;
+        const chg = (v / d.prevClose - 1) * 100;
+        return `${ps[0].name}<br>${v.toLocaleString()}（${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%）`;
+      },
+    },
+    series: [{
+      type: "line", data: d.points.map(p => p[1]),
+      symbol: "none", lineStyle: { color, width: 1.5 },
+      areaStyle: { color, opacity: 0.12 },
+      markLine: {
+        silent: true, symbol: "none",
+        lineStyle: { color: "#6e7681", type: "dashed" },
+        label: { color: "#8b949e", formatter: "昨收 {c}" },
+        data: [{ yAxis: d.prevClose }],
+      },
+    }],
+  }, true);
+}
+
+// ---------- 自選股 ----------
+const WL_KEY = "tide_watchlist";
+const getWL = () => JSON.parse(localStorage.getItem(WL_KEY) || '["2330"]');
+const setWL = wl => localStorage.setItem(WL_KEY, JSON.stringify(wl));
+
+function sparkSVG(spark, prev, color) {
+  if (!spark || spark.length < 2) return "";
+  const w = 280, h = 56;
+  const lo = Math.min(...spark, prev), hi = Math.max(...spark, prev);
+  const span = (hi - lo) || 1;
+  const px = i => (i / (spark.length - 1)) * w;
+  const py = v => h - ((v - lo) / span) * (h - 6) - 3;
+  const pts = spark.map((v, i) => `${px(i).toFixed(1)},${py(v).toFixed(1)}`).join(" ");
+  const base = py(prev).toFixed(1);
+  return `<svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <line x1="0" y1="${base}" x2="${w}" y2="${base}" stroke="#6e7681" stroke-dasharray="4 3" stroke-width="1"/>
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
+}
+
+async function renderWatch() {
+  const data = await fetchJSON("tw_stocks");
+  const cards = document.getElementById("cards");
+  if (!data) {
+    document.getElementById("meta").textContent = "尚無個股資料（請先啟動盤中 runner）";
+    cards.innerHTML = "";
+    return;
+  }
+  const live = isFresh(data) ? "　🔴 即時" : "（已收盤/資料非即時）";
+  document.getElementById("meta").textContent = `自選股監控｜${data.dataDate}${live}`;
+
+  cards.innerHTML = getWL().map(code => {
+    const s = data.stocks[code];
+    if (!s) return `<div class="card"><button class="rm" data-code="${code}">✕</button>
+      <h3>${code}</h3><div class="ohlc">查無資料（僅支援上市普通股）</div></div>`;
+    const cls = s.chg > 0 ? "up" : s.chg < 0 ? "down" : "flat";
+    const sign = s.chg > 0 ? "+" : "";
+    const color = s.chg > 0 ? "#f85149" : s.chg < 0 ? "#3fb950" : "#8b949e";
+    return `<div class="card">
+      <button class="rm" data-code="${code}">✕</button>
+      <h3>${s.n}<small>${code}</small></h3>
+      <div class="price ${cls}">${s.z}<small>${sign}${s.chg}%</small></div>
+      <div class="ohlc">
+        <span>開 <b>${s.o ?? "-"}</b></span><span>高 <b>${s.h ?? "-"}</b></span>
+        <span>低 <b>${s.l ?? "-"}</b></span><span>昨收 <b>${s.y}</b></span>
+      </div>
+      <div class="ohlc">
+        <span>成交量 <b>${s.v.toLocaleString()} 張</b></span>
+        <span>金額 <b>${s.a} 億</b></span>
+      </div>
+      ${sparkSVG(s.spark, s.y, color)}</div>`;
+  }).join("");
+
+  cards.querySelectorAll(".rm").forEach(b => b.addEventListener("click", () => {
+    setWL(getWL().filter(c => c !== b.dataset.code));
+    renderWatch();
+  }));
+}
+
+function addWatch() {
+  const input = document.getElementById("watch-input");
+  const code = input.value.trim();
+  if (!/^\d{4}$/.test(code)) { input.value = ""; return; }
+  const wl = getWL();
+  if (!wl.includes(code)) { wl.push(code); setWL(wl); }
+  input.value = "";
+  renderWatch();
+}
+document.getElementById("watch-add").addEventListener("click", addWatch);
+document.getElementById("watch-input").addEventListener("keydown",
+  e => { if (e.key === "Enter") addWatch(); });
 
 document.querySelectorAll(".tab").forEach(btn => {
   btn.addEventListener("click", () => {
