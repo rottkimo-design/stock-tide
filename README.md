@@ -20,12 +20,16 @@ public/                   # 純靜態前端（ECharts 泡泡圖）
 └── data/{tw,us}.json     # 管線輸出
 ```
 
-## 兩套輪動指標
+## 三套輪動指標
 
 | 市場 | 指標 | X 軸 | Y 軸 | 泡泡大小 |
 |------|------|------|------|----------|
-| 台股 | 三大法人買賣超 | 近 5 日買賣超金額 | 加速度（近5日−前5日） | 近 20 日累計金額 |
+| 台股（盤後） | 三大法人買賣超 | 近 5 日買賣超金額 | 加速度（近5日−前5日） | 近 20 日累計金額 |
+| 台股（盤中） | 即時價量 | 相對大盤漲跌幅 | 資金動能（近30分占比−全日占比） | 當日成交金額占比 |
 | 美股 | RRG vs SPY | RS-Ratio 相對強度 | RS-Momentum 相對動能 | 近 20 日報酬絕對值 |
+
+**盤中／盤後自動切換**：前端看 `tw_intraday.json` 的 `generatedAt` 是否在 10 分鐘內 ——
+開盤時段 runner 持續更新 → 顯示盤中版（每分鐘自動刷新）；收盤後資料過期 → 自動回到法人版。
 
 四階段：**漲潮**（加速流入/Leading）→ **輪動**（放緩/Weakening）→ **退潮**（流出/Lagging）→ **觀望**（趨緩/Improving）。
 
@@ -35,8 +39,11 @@ public/                   # 純靜態前端（ECharts 泡泡圖）
 
 ```bash
 pip install -r requirements.txt
-python pipeline/run.py        # 全部市場（台股首次約 3-5 分鐘，之後有快取）
+python pipeline/run.py        # 盤後管線：全部市場（台股首次約 3-5 分鐘，之後有快取）
 python pipeline/run.py us     # 只跑美股
+
+python pipeline/intraday.py        # 盤中常駐：開盤時間每 60 秒更新一輪（收盤自動結束）
+python pipeline/intraday.py --once # 測試：立刻跑一輪
 
 # 看圖：任何靜態伺服器即可
 python -m http.server 8000 -d public
@@ -50,5 +57,9 @@ python -m http.server 8000 -d public
 
 ## 資料源
 
-- 台股：[TWSE OpenAPI](https://openapi.twse.com.tw/)（T86 三大法人、STOCK_DAY_ALL 收盤價、t187ap03_L 產業別）— 免費，請求間隔 3 秒
+- 台股盤後：[TWSE OpenAPI](https://openapi.twse.com.tw/)（T86 三大法人、STOCK_DAY_ALL 收盤價、t187ap03_L 產業別）— 免費，請求間隔 3 秒
+- 台股盤中：證交所 MIS 行情快照（mis.twse.com.tw，非官方公開介面、免金鑰）— 約 5 秒延遲，批次間隔 1.2 秒避免封 IP
 - 美股：Yahoo Finance（yfinance）— 免費
+
+> 法人買賣超是盤後資料（每日 16:00 後公布），盤中不存在即時法人動向，
+> 因此盤中版改用價量計算資金流 proxy：「盤中看價量潮汐、盤後看法人定調」。

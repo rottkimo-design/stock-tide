@@ -58,21 +58,47 @@ const fmtLog = v => {
   return Math.abs(raw) >= 100 ? Math.round(raw) : +raw.toFixed(1);
 };
 
+let refreshTimer = null;
+
+async function fetchJSON(name) {
+  try {
+    const res = await fetch(`data/${name}.json?t=${Date.now()}`);
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+}
+
+const isFresh = d => d?.generatedAt &&
+  (Date.now() - new Date(d.generatedAt).getTime()) < 10 * 60 * 1000;
+
 async function load(market) {
-  if (!cache[market]) {
-    const res = await fetch(`data/${market}.json?t=${Date.now() >> 16}`);
-    cache[market] = await res.json();
+  clearInterval(refreshTimer);
+  refreshTimer = null;
+
+  if (market === "tw") {
+    // 盤中價量版 10 分鐘內有更新 → 即時模式；否則回盤後法人版
+    const intraday = await fetchJSON("tw_intraday");
+    if (isFresh(intraday)) {
+      render(intraday);
+      refreshTimer = setInterval(async () => {
+        const d = await fetchJSON("tw_intraday");
+        if (isFresh(d)) render(d); else load("tw");
+      }, 60 * 1000);
+      return;
+    }
   }
+  if (!cache[market]) cache[market] = await fetchJSON(market);
   render(cache[market]);
 }
 
 function render(d) {
+  const live = d.mode === "intraday"
+    ? `｜大盤 ${d.marketChg > 0 ? "+" : ""}${d.marketChg}%　🔴 即時` : "";
   document.getElementById("meta").textContent =
-    `${d.title}｜資料日期 ${d.dataDate}`;
+    `${d.title}｜${d.dataDate}${live}`;
 
   const isRRG = d.mode === "rrg";
   const cx = isRRG ? 100 : 0, cy = isRRG ? 100 : 0;
-  const tx = isRRG ? (v => v) : slog;  // 台股資金流用對稱對數刻度
+  const tx = d.mode === "flow" ? slog : (v => v);  // 法人金額跨度大才需要對數刻度
   const sizes = d.sectors.map(s => s.size);
   const maxSize = Math.max(...sizes, 1);
 
@@ -97,7 +123,7 @@ function render(d) {
       type: "value", scale: true,
       axisLine: { lineStyle: { color: "#484f58" } },
       splitLine: { lineStyle: { color: "#21262d" } },
-      axisLabel: { color: "#8b949e", formatter: isRRG ? undefined : fmtLog },
+      axisLabel: { color: "#8b949e", formatter: d.mode === "flow" ? fmtLog : undefined },
       nameTextStyle: { color: "#8b949e" },
     },
     yAxis: {
@@ -105,7 +131,7 @@ function render(d) {
       type: "value", scale: true,
       axisLine: { lineStyle: { color: "#484f58" } },
       splitLine: { lineStyle: { color: "#21262d" } },
-      axisLabel: { color: "#8b949e", formatter: isRRG ? undefined : fmtLog },
+      axisLabel: { color: "#8b949e", formatter: d.mode === "flow" ? fmtLog : undefined },
       nameTextStyle: { color: "#8b949e" },
     },
     tooltip: {
@@ -115,7 +141,14 @@ function render(d) {
         const s = p.data.raw;
         if (!s) return "";
         let html = `<b>${s.name}</b>　<span style="color:${COLORS[s.phase]}">${PHASE_TXT[s.phase]}</span><br>`;
-        if (d.mode === "flow") {
+        if (d.mode === "intraday") {
+          html += `板塊漲跌：${s.chg > 0 ? "+" : ""}${s.chg}%（相對大盤 ${s.x > 0 ? "+" : ""}${s.x}%）<br>` +
+                  `資金動能：${s.y > 0 ? "+" : ""}${s.y} 百分點<br>` +
+                  `成交金額：${s.amount} 億（占比 ${s.size}%）`;
+          if (s.topStocks?.length) html += `<br><br><b>成交額前五</b><br>` +
+            s.topStocks.map(t =>
+              `${t.code} ${t.name}　${t.chg > 0 ? "+" : ""}${t.chg}%　${t.amount}億`).join("<br>");
+        } else if (d.mode === "flow") {
           html += `近5日買賣超：${s.x} 億<br>加速度：${s.y} 億<br>近20日累計：${s.flow20} 億`;
           if (s.topBuy?.length) html += `<br><br><b>法人買超</b><br>` +
             s.topBuy.map(t => `${t.code} ${t.name}　+${t.amount}億`).join("<br>");
