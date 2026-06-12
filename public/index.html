@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Tide｜資金輪動圖</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #e6edf3;
+    --muted: #8b949e;
+    --rising: #f85149; --rotating: #d29922; --watching: #58a6ff; --ebbing: #3fb950;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--text); font-family: "Noto Sans TC", system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  h1 { font-size: 18px; }
+  .tabs { display: flex; gap: 8px; }
+  .tab { padding: 6px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--muted); cursor: pointer; font-size: 14px; }
+  .tab.active { color: var(--text); border-color: #58a6ff; background: #1c2a3a; }
+  .meta { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .legend { display: flex; gap: 14px; padding: 10px 20px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+  .legend span::before { content: "●"; margin-right: 4px; }
+  .lg-rising::before { color: var(--rising); } .lg-rotating::before { color: var(--rotating); }
+  .lg-watching::before { color: var(--watching); } .lg-ebbing::before { color: var(--ebbing); }
+  #chart { width: 100%; height: calc(100vh - 110px); min-height: 480px; }
+  /* 台股慣例：紅=漲潮(流入) 綠=退潮(流出) */
+</style>
+</head>
+<body>
+<header>
+  <h1>🌊 Stock Tide</h1>
+  <div class="tabs">
+    <button class="tab active" data-market="tw">台股</button>
+    <button class="tab" data-market="us">美股</button>
+  </div>
+  <div class="meta" id="meta"></div>
+</header>
+<div class="legend">
+  <span class="lg-rising">漲潮（加速流入）</span>
+  <span class="lg-rotating">輪動（流入放緩）</span>
+  <span class="lg-watching">觀望（流出趨緩）</span>
+  <span class="lg-ebbing">退潮（持續流出）</span>
+</div>
+<div id="chart"></div>
+
+<script>
+const COLORS = { rising: "#f85149", rotating: "#d29922", watching: "#58a6ff", ebbing: "#3fb950" };
+const PHASE_TXT = { rising: "漲潮", rotating: "輪動", watching: "觀望", ebbing: "退潮" };
+const chart = echarts.init(document.getElementById("chart"), null, { renderer: "canvas" });
+let cache = {};
+
+async function load(market) {
+  if (!cache[market]) {
+    const res = await fetch(`data/${market}.json?t=${Date.now() >> 16}`);
+    cache[market] = await res.json();
+  }
+  render(cache[market]);
+}
+
+function render(d) {
+  document.getElementById("meta").textContent =
+    `${d.title}｜資料日期 ${d.dataDate}`;
+
+  const isRRG = d.mode === "rrg";
+  const cx = isRRG ? 100 : 0, cy = isRRG ? 100 : 0;
+  const sizes = d.sectors.map(s => s.size);
+  const maxSize = Math.max(...sizes, 1);
+
+  const series = [{
+    type: "scatter",
+    data: d.sectors.map(s => ({
+      name: s.name, value: [s.x, s.y], raw: s,
+      symbolSize: 14 + 46 * Math.sqrt(s.size / maxSize),
+      itemStyle: { color: COLORS[s.phase], opacity: 0.82,
+                   borderColor: "#fff", borderWidth: 0.5 },
+      label: { show: true, position: "top", color: "#e6edf3",
+               fontSize: 11, formatter: s.name },
+    })),
+  }];
+
+  // RRG 軌跡尾巴
+  if (isRRG) {
+    d.sectors.forEach(s => {
+      if (!s.trail) return;
+      series.push({
+        type: "line", data: s.trail, symbol: "circle", symbolSize: 3,
+        lineStyle: { color: COLORS[s.phase], width: 1, opacity: 0.45 },
+        itemStyle: { color: COLORS[s.phase], opacity: 0.45 },
+        silent: true, z: 1,
+      });
+    });
+  }
+
+  chart.setOption({
+    backgroundColor: "transparent",
+    grid: { left: 60, right: 30, top: 40, bottom: 50 },
+    xAxis: {
+      name: d.axisX + (d.unit ? `（${d.unit}）` : ""), nameLocation: "middle", nameGap: 28,
+      type: "value", scale: true,
+      axisLine: { lineStyle: { color: "#484f58" } },
+      splitLine: { lineStyle: { color: "#21262d" } },
+      axisLabel: { color: "#8b949e" }, nameTextStyle: { color: "#8b949e" },
+    },
+    yAxis: {
+      name: d.axisY, nameGap: 42, nameLocation: "middle",
+      type: "value", scale: true,
+      axisLine: { lineStyle: { color: "#484f58" } },
+      splitLine: { lineStyle: { color: "#21262d" } },
+      axisLabel: { color: "#8b949e" }, nameTextStyle: { color: "#8b949e" },
+    },
+    tooltip: {
+      backgroundColor: "#161b22", borderColor: "#30363d",
+      textStyle: { color: "#e6edf3", fontSize: 12 },
+      formatter: p => {
+        const s = p.data.raw;
+        if (!s) return "";
+        let html = `<b>${s.name}</b>　<span style="color:${COLORS[s.phase]}">${PHASE_TXT[s.phase]}</span><br>`;
+        if (d.mode === "flow") {
+          html += `近5日買賣超：${s.x} 億<br>加速度：${s.y} 億<br>近20日累計：${s.flow20} 億`;
+          if (s.topBuy?.length) html += `<br><br><b>法人買超</b><br>` +
+            s.topBuy.map(t => `${t.code} ${t.name}　+${t.amount}億`).join("<br>");
+          if (s.topSell?.length) html += `<br><b>法人賣超</b><br>` +
+            s.topSell.map(t => `${t.code} ${t.name}　${t.amount}億`).join("<br>");
+        } else {
+          html += `RS-Ratio：${s.x}<br>RS-Momentum：${s.y}<br>近20日報酬：${s.ret20}%`;
+        }
+        return html;
+      },
+    },
+    // 象限分隔線
+    graphic: [],
+    series: series.concat([{
+      type: "line", markLine: {
+        silent: true, symbol: "none",
+        lineStyle: { color: "#6e7681", type: "dashed", width: 1 },
+        label: { show: false },
+        data: [{ xAxis: cx }, { yAxis: cy }],
+      }, data: [],
+    }]),
+  }, true);
+}
+
+document.querySelectorAll(".tab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    load(btn.dataset.market);
+  });
+});
+window.addEventListener("resize", () => chart.resize());
+load("tw");
+</script>
+</body>
+</html>
