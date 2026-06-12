@@ -36,7 +36,7 @@ class MisProvider:
     def fetch_index_quote(self, symbol: str = "tse_t00.tw") -> dict | None:
         """指數即時報價（加權 tse_t00.tw / 櫃買 otc_o00.tw）。"""
         url = ("https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
-               f"?ex_ch={symbol}&json=1&delay=0")
+               f"?ex_ch={symbol}&json=1&delay=0&_={_ts()}")
         try:
             m = self._session.get(url, timeout=15).json()["msgArray"][0]
             z, y = float(m["z"]), float(m["y"])
@@ -59,7 +59,7 @@ class MisProvider:
             batch = codes[i:i + BATCH]
             ex_ch = "|".join(f"tse_{c}.tw" for c in batch)
             url = ("https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
-                   f"?ex_ch={ex_ch}&json=1&delay=0")
+                   f"?ex_ch={ex_ch}&json=1&delay=0&_={_ts()}")
             try:
                 data = self._session.get(url, timeout=15).json()
             except (requests.RequestException, ValueError):
@@ -89,6 +89,12 @@ class MisProvider:
                 })
             time.sleep(SLEEP)
         return pd.DataFrame(rows)
+
+
+def _ts() -> int:
+    """毫秒時間戳 cache-buster：MIS 的 CDN 會對相同 URL 回快取，
+    沒帶這個參數會隔次拿到舊資料（單量交錯出現 0）。官方網頁版同樣做法。"""
+    return int(time.time() * 1000)
 
 
 def _num(v) -> float | None:
