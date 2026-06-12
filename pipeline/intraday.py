@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pipeline.indicators.intraday import compute_intraday, sector_amounts
+from pipeline.indicators.intraday import compute_intraday
 from pipeline.providers.mis import MisProvider
 from pipeline.providers.twse import TwseProvider
 
@@ -34,22 +34,26 @@ def market_open(now: datetime) -> bool:
     return 9 * 60 <= t <= 13 * 60 + 35
 
 
-def load_history(day: str) -> list[dict]:
-    f = HIST_DIR / f"{day}.jsonl"
-    if not f.exists():
-        return []
-    return [json.loads(line) for line in
-            f.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
-def ref_snapshot(history: list[dict], now: datetime) -> dict | None:
-    """取最接近 MOMENTUM_MIN 分鐘前的板塊金額快照（至少要 5 分鐘前）。"""
-    target = (now - timedelta(minutes=MOMENTUM_MIN)).timestamp()
-    floor = (now - timedelta(minutes=5)).timestamp()
-    candidates = [h for h in history if h["ts"] <= floor]
-    if not candidates:
+def ref_shares(state: dict, now: datetime) -> dict[str, float] | None:
+    """取最接近 MOMENTUM_MIN 分鐘前的逐股累計成交股數（至少要 5 分鐘前）。"""
+    times = state.get("times", [])
+    series = state.get("series", {})
+    if not times:
         return None
-    return min(candidates, key=lambda h: abs(h["ts"] - target))["amounts"]
+
+    def t2dt(t: str) -> datetime:
+        h, m = map(int, t.split(":"))
+        return now.replace(hour=h, minute=m, second=0, microsecond=0)
+
+    target = now - timedelta(minutes=MOMENTUM_MIN)
+    floor = now - timedelta(minutes=5)
+    idxs = [i for i, t in enumerate(times) if t2dt(t) <= floor]
+    if not idxs:
+        return None
+    idx = min(idxs, key=lambda i: abs((t2dt(times[i]) - target).total_seconds()))
+    return {code: s["v"][idx] * 1000  # 張 → 股
+            for code, s in series.items()
+            if idx < len(s["v"]) and s["v"][idx] is not None}
 
 
 def load_state(day: str) -> dict:
@@ -203,9 +207,8 @@ def run_cycle(mis: MisProvider, industry: dict[str, str],
 
     index_quote = mis.fetch_index_quote()
     otc_quote = mis.fetch_index_quote("otc_o00.tw")
-    history = load_history(day)
     sectors, market_chg = compute_intraday(
-        snap, ref_snapshot(history, now),
+        snap, ref_shares(state, now),
         index_quote["chg"] if index_quote else None)
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -230,10 +233,6 @@ def run_cycle(mis: MisProvider, industry: dict[str, str],
     write_trajectory_json(now, state)
     save_state(day, state)
 
-    HIST_DIR.mkdir(parents=True, exist_ok=True)
-    with open(HIST_DIR / f"{day}.jsonl", "a", encoding="utf-8") as f:
-        f.write(json.dumps({"ts": now.timestamp(),
-                            "amounts": sector_amounts(snap)}) + "\n")
     print(f"[{now:%H:%M}] 更新完成：{len(sectors)} 板塊、"
           f"{len(snap)} 檔個股、大盤 {market_chg:+.2f}%")
     return True

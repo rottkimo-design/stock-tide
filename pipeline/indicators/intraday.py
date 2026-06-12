@@ -21,19 +21,16 @@ def classify(x: float, y: float) -> str:
     return "watching" if y > 0 else "ebbing"
 
 
-def sector_amounts(snap: pd.DataFrame) -> dict[str, float]:
-    """板塊累計成交金額（供 runner 存成歷史快照）。"""
-    s = snap.copy()
-    s["amount"] = s["acc_shares"] * s["price"]
-    return s.groupby("sector")["amount"].sum().to_dict()
-
-
 def compute_intraday(snap: pd.DataFrame,
-                     ref_amounts: dict[str, float] | None,
+                     ref_shares: dict[str, float] | None,
                      market_chg: float | None = None) -> list[dict]:
     """snap: code, name, price, prev_close, acc_shares, sector
-    ref_amounts: 約 30 分鐘前的板塊累計金額（None = 剛開盤）
+    ref_shares: 約 30 分鐘前的逐股累計成交股數（None = 剛開盤）
     market_chg: 大盤漲跌幅（加權指數）；抓不到時退回金額加權平均
+
+    動能用「逐股量增 × 現價」計算：成交量單調遞增，逐股增量
+    永遠 >= 0，避免板塊層級的 量×價 因價格下跌算出負增量、
+    動能被歸零成 -全日占比 的假尖刺。
     """
     s = snap.copy()
     s["amount"] = s["acc_shares"] * s["price"]
@@ -46,10 +43,12 @@ def compute_intraday(snap: pd.DataFrame,
     now_amt = s.groupby("sector")["amount"].sum()
     total_share = now_amt / market_amount * 100
 
-    # 近 30 分增量金額占比
-    if ref_amounts:
-        recent = (now_amt - pd.Series(ref_amounts).reindex(now_amt.index)
-                  .fillna(0)).clip(lower=0)
+    # 近 30 分增量金額占比（逐股計算）
+    if ref_shares:
+        ref = s["code"].map(ref_shares)
+        s["recent"] = ((s["acc_shares"] - ref).clip(lower=0)
+                       * s["price"]).fillna(0)  # 缺 ref 的個股以 0 計
+        recent = s.groupby("sector")["recent"].sum()
         recent_total = recent.sum()
         recent_share = (recent / recent_total * 100) if recent_total > 0 \
             else total_share
