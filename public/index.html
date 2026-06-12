@@ -41,6 +41,14 @@
     border-radius: 8px; padding: 8px 16px; cursor: pointer; }
   #cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; position: relative; }
+  .card.dragging { opacity: 0.35; }
+  .card.dragover { border-color: #58a6ff; }
+  .wl-tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+  .wl-tab { padding: 5px 14px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel);
+    color: var(--muted); cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  .wl-tab.active { color: var(--text); border-color: #58a6ff; background: #1c2a3a; }
+  .wl-tab .del { color: var(--muted); cursor: pointer; font-size: 11px; }
+  .wl-tab .del:hover { color: #f85149; }
   .card .rm { position: absolute; top: 8px; right: 12px; color: var(--muted); cursor: pointer; background: none; border: none; font-size: 16px; }
   .card h3 { font-size: 15px; margin-bottom: 6px; }
   .card h3 small { color: var(--muted); font-weight: normal; margin-left: 6px; }
@@ -102,6 +110,7 @@
 <div id="chart"></div>
 <div id="watch">
   <div id="idx-cards"></div>
+  <div class="wl-tabs" id="wl-tabs"></div>
   <div class="watch-bar">
     <input id="watch-input" placeholder="代號或名稱，如 2330 / 台積電" autocomplete="off">
     <button id="watch-add">加入</button>
@@ -336,10 +345,31 @@ function renderIndex(d) {
   }, true);
 }
 
-// ---------- 自選股 ----------
-const WL_KEY = "tide_watchlist";
-const getWL = () => JSON.parse(localStorage.getItem(WL_KEY) || '["2330"]');
-const setWL = wl => localStorage.setItem(WL_KEY, JSON.stringify(wl));
+// ---------- 自選股（分組 + 排序）----------
+const WL_KEY = "tide_watch_v2";
+const ALL = "全部";
+
+function loadWL() {
+  let w = JSON.parse(localStorage.getItem(WL_KEY) || "null");
+  if (!w) {  // 從舊版單一清單遷移
+    const old = JSON.parse(localStorage.getItem("tide_watchlist") || '["2330"]');
+    w = { groups: [{ name: "預設", codes: old }], orderAll: [...old], active: ALL };
+  }
+  return w;
+}
+const saveWL = w => localStorage.setItem(WL_KEY, JSON.stringify(w));
+
+// 目前分頁顯示的代號清單（回傳的是可直接改動的參照，改完要 saveWL）
+function activeCodes(w) {
+  if (w.active === ALL) {
+    const all = w.groups.flatMap(g => g.codes);
+    w.orderAll = (w.orderAll || []).filter(c => all.includes(c));
+    for (const c of all) if (!w.orderAll.includes(c)) w.orderAll.push(c);
+    return w.orderAll;
+  }
+  const g = w.groups.find(g => g.name === w.active);
+  return g ? g.codes : [];
+}
 
 function sparkSVG(spark, prev, color) {
   if (!spark || spark.length < 2) return "";
@@ -382,14 +412,16 @@ async function renderWatch() {
   const live = isFresh(data) ? "　🔴 即時" : "（已收盤/資料非即時）";
   document.getElementById("meta").textContent = `自選股監控｜${data.dataDate}${live}`;
 
-  cards.innerHTML = getWL().map(code => {
+  const w = loadWL();
+  renderTabs(w);
+  cards.innerHTML = activeCodes(w).map(code => {
     const s = data.stocks[code];
     if (!s) return `<div class="card"><button class="rm" data-code="${code}">✕</button>
       <h3>${code}</h3><div class="ohlc">查無資料（僅支援上市普通股）</div></div>`;
     const cls = s.chg > 0 ? "up" : s.chg < 0 ? "down" : "flat";
     const sign = s.chg > 0 ? "+" : "";
     const color = s.chg > 0 ? "#f85149" : s.chg < 0 ? "#3fb950" : "#8b949e";
-    return `<div class="card" data-detail="${code}">
+    return `<div class="card" data-detail="${code}" draggable="true">
       <button class="rm" data-code="${code}">✕</button>
       <h3>${s.n}<small>${code}</small></h3>
       <div class="price ${cls}">${s.z}<small>${sign}${s.chg}%</small></div>
@@ -406,11 +438,89 @@ async function renderWatch() {
 
   cards.querySelectorAll(".rm").forEach(b => b.addEventListener("click", e => {
     e.stopPropagation();
-    setWL(getWL().filter(c => c !== b.dataset.code));
+    const w2 = loadWL();
+    const code = b.dataset.code;
+    if (w2.active === ALL) {  // 全部分頁移除 = 從所有分組移除
+      w2.groups.forEach(g => g.codes = g.codes.filter(c => c !== code));
+      w2.orderAll = (w2.orderAll || []).filter(c => c !== code);
+    } else {
+      const g = w2.groups.find(g => g.name === w2.active);
+      if (g) g.codes = g.codes.filter(c => c !== code);
+    }
+    saveWL(w2);
     renderWatch();
   }));
-  cards.querySelectorAll("[data-detail]").forEach(el =>
-    el.addEventListener("click", () => openDetail(el.dataset.detail)));
+  cards.querySelectorAll("[data-detail]").forEach(el => {
+    el.addEventListener("click", () => openDetail(el.dataset.detail));
+    bindDrag(el);
+  });
+}
+
+// ---------- 分組 tabs ----------
+function renderTabs(w) {
+  const names = [ALL, ...w.groups.map(g => g.name)];
+  document.getElementById("wl-tabs").innerHTML = names.map(n => {
+    const del = n !== ALL && w.groups.length > 1
+      ? `<span class="del" data-del="${n}">✕</span>` : "";
+    return `<button class="wl-tab${n === w.active ? " active" : ""}" data-g="${n}">${n}${del}</button>`;
+  }).join("") + `<button class="wl-tab" data-add>＋ 新分組</button>`;
+
+  const bar = document.getElementById("wl-tabs");
+  bar.querySelectorAll("[data-g]").forEach(b => b.addEventListener("click", () => {
+    const w2 = loadWL(); w2.active = b.dataset.g; saveWL(w2); renderWatch();
+  }));
+  bar.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    const name = b.dataset.del;
+    if (!confirm(`刪除分組「${name}」？（股票仍保留在其他分組/全部）`)) return;
+    const w2 = loadWL();
+    w2.groups = w2.groups.filter(g => g.name !== name);
+    if (w2.active === name) w2.active = ALL;
+    saveWL(w2); renderWatch();
+  }));
+  bar.querySelector("[data-add]").addEventListener("click", () => {
+    const name = prompt("新分組名稱：")?.trim();
+    if (!name || name === ALL) return;
+    const w2 = loadWL();
+    if (w2.groups.some(g => g.name === name)) return;
+    w2.groups.push({ name, codes: [] });
+    w2.active = name;
+    saveWL(w2); renderWatch();
+  });
+}
+
+// ---------- 拖曳排序 ----------
+let dragCode = null;
+
+function bindDrag(el) {
+  el.addEventListener("dragstart", e => {
+    dragCode = el.dataset.detail;
+    el.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+  });
+  el.addEventListener("dragend", () => {
+    el.classList.remove("dragging");
+    dragCode = null;
+  });
+  el.addEventListener("dragover", e => {
+    e.preventDefault();
+    if (dragCode && dragCode !== el.dataset.detail) el.classList.add("dragover");
+  });
+  el.addEventListener("dragleave", () => el.classList.remove("dragover"));
+  el.addEventListener("drop", e => {
+    e.preventDefault();
+    el.classList.remove("dragover");
+    const target = el.dataset.detail;
+    if (!dragCode || dragCode === target) return;
+    const w = loadWL();
+    const list = activeCodes(w);
+    const from = list.indexOf(dragCode), to = list.indexOf(target);
+    if (from < 0 || to < 0) return;
+    list.splice(from, 1);
+    list.splice(to, 0, dragCode);
+    saveWL(w);
+    renderWatch();
+  });
 }
 
 // ---------- 個股詳細頁 ----------
@@ -573,8 +683,13 @@ function matchStocks(q) {
 }
 
 function addCode(code) {
-  const wl = getWL();
-  if (!wl.includes(code)) { wl.push(code); setWL(wl); }
+  const w = loadWL();
+  // 在分組分頁時加進該分組；在「全部」時加進第一個分組
+  const g = w.active === ALL ? w.groups[0]
+    : w.groups.find(g => g.name === w.active) || w.groups[0];
+  if (!g.codes.includes(code)) g.codes.push(code);
+  if (!(w.orderAll || []).includes(code)) (w.orderAll ||= []).push(code);
+  saveWL(w);
   const input = document.getElementById("watch-input");
   input.value = "";
   hideSuggest();
