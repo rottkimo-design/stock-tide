@@ -41,7 +41,8 @@ def compute_rrg(close: pd.DataFrame, benchmark: str,
             continue
         rs = 100 * close[sym] / bench
         ratio = _normalize(rs, WINDOW)
-        mom = _normalize(ratio.diff(), WINDOW)
+        # 動能先做 3 日平滑，否則逐日跳動太大、軌跡雜亂
+        mom = _normalize(ratio.diff().rolling(3).mean(), WINDOW)
         pair = pd.concat([ratio, mom], axis=1).dropna()
         if len(pair) < trail:
             continue

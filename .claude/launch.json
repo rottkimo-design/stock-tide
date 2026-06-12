@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "stock-tide",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8765", "-d", "C:\\Users\\rottk\\stock-tide\\public"],
+      "port": 8765
+    }
+  ]
+}

@@ -50,6 +50,14 @@ const PHASE_TXT = { rising: "漲潮", rotating: "輪動", watching: "觀望", eb
 const chart = echarts.init(document.getElementById("chart"), null, { renderer: "canvas" });
 let cache = {};
 
+// 對稱對數刻度：量體差距大（半導體千億 vs 小板塊個位數億）時仍可分布開來
+const slog = v => Math.sign(v) * Math.log10(1 + Math.abs(v));
+const unslog = v => Math.sign(v) * (Math.pow(10, Math.abs(v)) - 1);
+const fmtLog = v => {
+  const raw = unslog(v);
+  return Math.abs(raw) >= 100 ? Math.round(raw) : +raw.toFixed(1);
+};
+
 async function load(market) {
   if (!cache[market]) {
     const res = await fetch(`data/${market}.json?t=${Date.now() >> 16}`);
@@ -64,13 +72,15 @@ function render(d) {
 
   const isRRG = d.mode === "rrg";
   const cx = isRRG ? 100 : 0, cy = isRRG ? 100 : 0;
+  const tx = isRRG ? (v => v) : slog;  // 台股資金流用對稱對數刻度
   const sizes = d.sectors.map(s => s.size);
   const maxSize = Math.max(...sizes, 1);
 
   const series = [{
     type: "scatter",
+    labelLayout: { hideOverlap: true },
     data: d.sectors.map(s => ({
-      name: s.name, value: [s.x, s.y], raw: s,
+      name: s.name, value: [tx(s.x), tx(s.y)], raw: s,
       symbolSize: 14 + 46 * Math.sqrt(s.size / maxSize),
       itemStyle: { color: COLORS[s.phase], opacity: 0.82,
                    borderColor: "#fff", borderWidth: 0.5 },
@@ -78,19 +88,6 @@ function render(d) {
                fontSize: 11, formatter: s.name },
     })),
   }];
-
-  // RRG 軌跡尾巴
-  if (isRRG) {
-    d.sectors.forEach(s => {
-      if (!s.trail) return;
-      series.push({
-        type: "line", data: s.trail, symbol: "circle", symbolSize: 3,
-        lineStyle: { color: COLORS[s.phase], width: 1, opacity: 0.45 },
-        itemStyle: { color: COLORS[s.phase], opacity: 0.45 },
-        silent: true, z: 1,
-      });
-    });
-  }
 
   chart.setOption({
     backgroundColor: "transparent",
@@ -100,14 +97,16 @@ function render(d) {
       type: "value", scale: true,
       axisLine: { lineStyle: { color: "#484f58" } },
       splitLine: { lineStyle: { color: "#21262d" } },
-      axisLabel: { color: "#8b949e" }, nameTextStyle: { color: "#8b949e" },
+      axisLabel: { color: "#8b949e", formatter: isRRG ? undefined : fmtLog },
+      nameTextStyle: { color: "#8b949e" },
     },
     yAxis: {
       name: d.axisY, nameGap: 42, nameLocation: "middle",
       type: "value", scale: true,
       axisLine: { lineStyle: { color: "#484f58" } },
       splitLine: { lineStyle: { color: "#21262d" } },
-      axisLabel: { color: "#8b949e" }, nameTextStyle: { color: "#8b949e" },
+      axisLabel: { color: "#8b949e", formatter: isRRG ? undefined : fmtLog },
+      nameTextStyle: { color: "#8b949e" },
     },
     tooltip: {
       backgroundColor: "#161b22", borderColor: "#30363d",
