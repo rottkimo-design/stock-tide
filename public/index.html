@@ -49,6 +49,36 @@
   .up { color: var(--rising); } .down { color: var(--ebbing); } .flat { color: var(--text); }
   .ohlc { display: flex; gap: 14px; color: var(--muted); font-size: 12px; margin: 8px 0 4px; flex-wrap: wrap; }
   .ohlc b { color: var(--text); font-weight: normal; }
+  .card { cursor: pointer; }
+
+  /* 指數卡片列 */
+  #idx-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .idx-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; }
+  .idx-card h4 { font-size: 13px; color: var(--muted); margin-bottom: 4px; font-weight: normal; }
+  .idx-card .val { font-size: 22px; font-weight: 700; }
+  .idx-card .val small { font-size: 13px; margin-left: 8px; }
+
+  /* 個股詳細頁 */
+  #detail { display: none; position: fixed; inset: 0; background: rgba(1,4,9,.72); z-index: 100; overflow: auto; }
+  .detail-box { max-width: 880px; margin: 24px auto; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 14px; padding: 18px 22px; }
+  .detail-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 10px; }
+  .detail-head .close { margin-left: auto; background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; }
+  #detail-chart { width: 100%; height: 300px; }
+  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 8px; }
+  @media (max-width: 720px) { .detail-grid { grid-template-columns: 1fr; } }
+  .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; font-size: 13px; align-content: start; }
+  .kv span { color: var(--muted); } .kv b { font-weight: normal; }
+  .ob { font-size: 13px; }
+  .ob h4, .ticks h4 { font-size: 13px; color: var(--muted); margin-bottom: 6px; font-weight: normal; }
+  .ob table { width: 100%; border-collapse: collapse; }
+  .ob td { padding: 3px 6px; position: relative; }
+  .ob .bar { position: absolute; top: 2px; bottom: 2px; opacity: 0.22; border-radius: 2px; }
+  .ticks { margin-top: 14px; }
+  .ticks table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .ticks td, .ticks th { padding: 3px 8px; text-align: right; border-bottom: 1px solid #21262d; }
+  .ticks th { color: var(--muted); font-weight: normal; }
+  .ticks td:first-child, .ticks th:first-child { text-align: left; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -71,12 +101,28 @@
 <div class="hint" id="hint" style="display:none">滾輪縮放、拖曳平移</div>
 <div id="chart"></div>
 <div id="watch">
+  <div id="idx-cards"></div>
   <div class="watch-bar">
     <input id="watch-input" placeholder="代號或名稱，如 2330 / 台積電" autocomplete="off">
     <button id="watch-add">加入</button>
     <div id="suggest"></div>
   </div>
   <div id="cards"></div>
+</div>
+<div id="detail">
+  <div class="detail-box">
+    <div class="detail-head">
+      <h3 id="dt-name" style="font-size:18px"></h3>
+      <span id="dt-price" class="price"></span>
+      <button class="close" id="dt-close">✕</button>
+    </div>
+    <div id="detail-chart"></div>
+    <div class="detail-grid">
+      <div class="kv" id="dt-info"></div>
+      <div class="ob"><h4>五檔委買委賣</h4><table id="dt-ob"></table></div>
+    </div>
+    <div class="ticks"><h4>分時明細（每分鐘取樣）</h4><table id="dt-ticks"></table></div>
+  </div>
 </div>
 
 <script>
@@ -311,9 +357,22 @@ function sparkSVG(spark, prev, color) {
 
 let stocksCache = null;  // 最新全市場報價，也是代號↔名稱對照表
 
+function idxCard(title, q) {
+  if (!q) return "";
+  const cls = q.chg > 0 ? "up" : q.chg < 0 ? "down" : "flat";
+  const sign = q.chg > 0 ? "+" : "";
+  return `<div class="idx-card"><h4>${title}</h4>
+    <div class="val ${cls}">${q.last.toLocaleString()}<small>${sign}${q.chg}%</small></div></div>`;
+}
+
 async function renderWatch() {
   let data = await fetchJSON("tw_stocks");
   if (data) stocksCache = data; else data = stocksCache;
+
+  const idx = await fetchJSON("tw_index");
+  document.getElementById("idx-cards").innerHTML = idx
+    ? idxCard("加權指數", idx) + idxCard("櫃買指數", idx.otc) : "";
+
   const cards = document.getElementById("cards");
   if (!data) {
     document.getElementById("meta").textContent = "尚無個股資料（請先啟動盤中 runner）";
@@ -330,7 +389,7 @@ async function renderWatch() {
     const cls = s.chg > 0 ? "up" : s.chg < 0 ? "down" : "flat";
     const sign = s.chg > 0 ? "+" : "";
     const color = s.chg > 0 ? "#f85149" : s.chg < 0 ? "#3fb950" : "#8b949e";
-    return `<div class="card">
+    return `<div class="card" data-detail="${code}">
       <button class="rm" data-code="${code}">✕</button>
       <h3>${s.n}<small>${code}</small></h3>
       <div class="price ${cls}">${s.z}<small>${sign}${s.chg}%</small></div>
@@ -345,10 +404,159 @@ async function renderWatch() {
       ${sparkSVG(s.spark, s.y, color)}</div>`;
   }).join("");
 
-  cards.querySelectorAll(".rm").forEach(b => b.addEventListener("click", () => {
+  cards.querySelectorAll(".rm").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
     setWL(getWL().filter(c => c !== b.dataset.code));
     renderWatch();
   }));
+  cards.querySelectorAll("[data-detail]").forEach(el =>
+    el.addEventListener("click", () => openDetail(el.dataset.detail)));
+}
+
+// ---------- 個股詳細頁 ----------
+let detailChart = null, detailTimer = null, detailCode = null;
+
+async function openDetail(code) {
+  detailCode = code;
+  document.getElementById("detail").style.display = "block";
+  if (!detailChart) {
+    detailChart = echarts.init(document.getElementById("detail-chart"));
+  }
+  await renderDetail();
+  clearInterval(detailTimer);
+  detailTimer = setInterval(renderDetail, 60 * 1000);
+}
+
+function closeDetail() {
+  document.getElementById("detail").style.display = "none";
+  clearInterval(detailTimer);
+  detailTimer = null;
+  detailCode = null;
+}
+document.getElementById("dt-close").addEventListener("click", closeDetail);
+document.getElementById("detail").addEventListener("click",
+  e => { if (e.target.id === "detail") closeDetail(); });
+
+async function renderDetail() {
+  if (!detailCode) return;
+  const code = detailCode;
+  const s = stocksCache?.stocks[code];
+  if (!s) return;
+  const series = await fetchJSON("tw_series");
+
+  const cls = s.chg > 0 ? "up" : s.chg < 0 ? "down" : "flat";
+  const sign = s.chg > 0 ? "+" : "";
+  const color = s.chg > 0 ? "#f85149" : s.chg < 0 ? "#3fb950" : "#8b949e";
+  document.getElementById("dt-name").textContent = `${s.n} ${code}`;
+  const priceEl = document.getElementById("dt-price");
+  priceEl.className = `price ${cls}`;
+  priceEl.innerHTML = `${s.z}<small>${sign}${s.chg}%</small>`;
+
+  // 走勢圖：價格線 + 均價線 + 量能
+  const ser = series?.stocks[code];
+  if (ser) {
+    const times = series.times;
+    const prices = ser.p;
+    const vols = ser.v.map((v, i) =>
+      v == null ? 0 : Math.max(0, v - (i > 0 ? (ser.v[i - 1] ?? v) : 0)));
+    if (ser.v[0] != null) vols[0] = 0;  // 第一筆是累計值非單量
+    let cumA = 0, cumV = 0;
+    const avg = prices.map((p, i) => {
+      if (p != null && vols[i] > 0) { cumA += p * vols[i]; cumV += vols[i]; }
+      return cumV > 0 ? +(cumA / cumV).toFixed(2) : p;
+    });
+    const lo = Math.min(...prices.filter(p => p != null), s.y);
+    const hi = Math.max(...prices.filter(p => p != null), s.y);
+    const pad = Math.max((hi - lo) * 0.12, s.y * 0.002);
+    detailChart.setOption({
+      backgroundColor: "transparent",
+      grid: [{ left: 56, right: 16, top: 12, height: 180 },
+             { left: 56, right: 16, top: 210, height: 64 }],
+      xAxis: [
+        { type: "category", data: times, gridIndex: 0, show: false },
+        { type: "category", data: times, gridIndex: 1,
+          axisLine: { lineStyle: { color: "#484f58" } },
+          axisLabel: { color: "#8b949e" } },
+      ],
+      yAxis: [
+        { type: "value", gridIndex: 0, min: +(lo - pad).toFixed(2), max: +(hi + pad).toFixed(2),
+          splitLine: { lineStyle: { color: "#21262d" } },
+          axisLabel: { color: "#8b949e" } },
+        { type: "value", gridIndex: 1, splitLine: { show: false },
+          axisLabel: { color: "#8b949e", formatter: v => v >= 1000 ? (v / 1000) + "k" : v } },
+      ],
+      axisPointer: { link: [{ xAxisIndex: "all" }] },
+      tooltip: {
+        trigger: "axis",
+        backgroundColor: "#161b22", borderColor: "#30363d",
+        textStyle: { color: "#e6edf3", fontSize: 12 },
+        formatter: ps => {
+          const i = ps[0].dataIndex;
+          return `${times[i]}<br>成交 ${prices[i] ?? "-"}　均價 ${avg[i] ?? "-"}<br>單量 ${vols[i]} 張`;
+        },
+      },
+      series: [
+        { type: "line", data: prices, xAxisIndex: 0, yAxisIndex: 0,
+          symbol: "none", lineStyle: { color, width: 1.5 }, connectNulls: true,
+          markLine: { silent: true, symbol: "none",
+            lineStyle: { color: "#6e7681", type: "dashed" },
+            label: { color: "#8b949e", formatter: "昨收 {c}" },
+            data: [{ yAxis: s.y }] } },
+        { type: "line", data: avg, xAxisIndex: 0, yAxisIndex: 0,
+          symbol: "none", lineStyle: { color: "#d2a8ff", width: 1 }, connectNulls: true },
+        { type: "bar", data: vols, xAxisIndex: 1, yAxisIndex: 1,
+          itemStyle: { color: "#58a6ff", opacity: 0.7 } },
+      ],
+    }, true);
+  }
+
+  // 基本資料
+  const f = v => v ?? "-";
+  document.getElementById("dt-info").innerHTML = `
+    <span>漲停</span><b class="up">${f(s.u)}</b>
+    <span>跌停</span><b class="down">${f(s.w)}</b>
+    <span>開盤</span><b>${f(s.o)}</b>
+    <span>昨收</span><b>${s.y}</b>
+    <span>最高</span><b>${f(s.h)}</b>
+    <span>最低</span><b>${f(s.l)}</b>
+    <span>成交量</span><b>${s.v.toLocaleString()} 張</b>
+    <span>成交金額</span><b>${s.a} 億</b>`;
+
+  // 五檔
+  const maxVol = Math.max(...(s.bids || []).map(b => b[1]),
+                          ...(s.asks || []).map(a => a[1]), 1);
+  const rows = [];
+  for (let i = 0; i < 5; i++) {
+    const b = (s.bids || [])[i], a = (s.asks || [])[i];
+    rows.push(`<tr>
+      <td style="text-align:right">${b ? b[1].toLocaleString() : "-"}</td>
+      <td style="text-align:right;color:#f85149">${b ? b[0] : "-"}
+        ${b ? `<div class="bar" style="right:0;width:${(b[1] / maxVol * 96).toFixed(0)}%;background:#f85149"></div>` : ""}</td>
+      <td style="color:#3fb950">${a ? a[0] : "-"}
+        ${a ? `<div class="bar" style="left:0;width:${(a[1] / maxVol * 96).toFixed(0)}%;background:#3fb950"></div>` : ""}</td>
+      <td>${a ? a[1].toLocaleString() : "-"}</td></tr>`);
+  }
+  document.getElementById("dt-ob").innerHTML =
+    `<tr><th style="text-align:right;color:#8b949e;font-weight:normal">委買量</th>
+     <th style="text-align:right;color:#8b949e;font-weight:normal">買價</th>
+     <th style="color:#8b949e;font-weight:normal">賣價</th>
+     <th style="color:#8b949e;font-weight:normal">委賣量</th></tr>` + rows.join("");
+
+  // 分時明細（最近 20 筆取樣）
+  if (ser) {
+    const times = series.times;
+    const tickRows = [];
+    for (let i = times.length - 1; i >= 0 && tickRows.length < 20; i--) {
+      const p = ser.p[i];
+      if (p == null) continue;
+      const dv = i > 0 ? Math.max(0, (ser.v[i] ?? 0) - (ser.v[i - 1] ?? 0)) : 0;
+      const c = p > s.y ? "up" : p < s.y ? "down" : "flat";
+      tickRows.push(`<tr><td>${times[i]}</td>
+        <td class="${c}">${p}</td><td>${dv.toLocaleString()}</td></tr>`);
+    }
+    document.getElementById("dt-ticks").innerHTML =
+      `<tr><th>時間</th><th>成交價</th><th>單量(張)</th></tr>` + tickRows.join("");
+  }
 }
 
 // 代號或名稱 → [code, name] 候選清單（代號前綴或名稱包含）

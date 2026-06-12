@@ -33,10 +33,10 @@ class MisProvider:
         q = self.fetch_index_quote()
         return q["chg"] if q else None
 
-    def fetch_index_quote(self) -> dict | None:
-        """加權指數即時報價：last/prev_close/open/high/low/chg。"""
+    def fetch_index_quote(self, symbol: str = "tse_t00.tw") -> dict | None:
+        """指數即時報價（加權 tse_t00.tw / 櫃買 otc_o00.tw）。"""
         url = ("https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
-               "?ex_ch=tse_t00.tw&json=1&delay=0")
+               f"?ex_ch={symbol}&json=1&delay=0")
         try:
             m = self._session.get(url, timeout=15).json()["msgArray"][0]
             z, y = float(m["z"]), float(m["y"])
@@ -81,6 +81,11 @@ class MisProvider:
                     "open": _num(s.get("o")),
                     "high": _num(s.get("h")),
                     "low": _num(s.get("l")),
+                    "limit_up": _num(s.get("u")),
+                    "limit_down": _num(s.get("w")),
+                    # 五檔：價格/數量各以 _ 分隔
+                    "bids": _levels(s.get("b"), s.get("g")),
+                    "asks": _levels(s.get("a"), s.get("f")),
                 })
             time.sleep(SLEEP)
         return pd.DataFrame(rows)
@@ -92,3 +97,13 @@ def _num(v) -> float | None:
         return f if f > 0 else None
     except (TypeError, ValueError):
         return None
+
+
+def _levels(prices, volumes) -> list[list[float]]:
+    """五檔 '171.5_171.0_...' + '437_727_...' → [[價, 張], ...]"""
+    out = []
+    for p, v in zip((prices or "").split("_"), (volumes or "").split("_")):
+        pn, vn = _num(p), _num(v)
+        if pn and vn:
+            out.append([pn, int(vn)])
+    return out[:5]

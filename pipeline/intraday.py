@@ -66,25 +66,73 @@ def save_state(day: str, state: dict):
         json.dumps(state), encoding="utf-8")
 
 
-def write_index_json(now: datetime, quote: dict | None, state: dict):
-    if quote:
-        pts = state["index_points"]
-        t = f"{now:%H:%M}"
-        if not pts or pts[-1][0] != t:
-            pts.append([t, round(quote["last"], 2)])
-        state["last_quote"] = quote
-    quote = state.get("last_quote")
-    if not quote:
-        return
-    (DATA_DIR / "tw_index.json").write_text(json.dumps({
-        "market": "tw-index",
-        "title": "台股加權指數",
-        "dataDate": f"{now:%Y-%m-%d}",
+def _index_payload(quote: dict, points: list) -> dict:
+    return {
         "prevClose": quote["prev_close"],
         "open": quote.get("open"), "high": quote.get("high"),
         "low": quote.get("low"), "last": quote["last"],
         "chg": round(quote["chg"], 2),
-        "points": state["index_points"],
+        "points": points,
+    }
+
+
+def write_index_json(now: datetime, quote: dict | None,
+                     otc: dict | None, state: dict):
+    t = f"{now:%H:%M}"
+    if quote:
+        pts = state["index_points"]
+        if not pts or pts[-1][0] != t:
+            pts.append([t, round(quote["last"], 2)])
+        state["last_quote"] = quote
+    if otc:
+        pts = state.setdefault("otc_points", [])
+        if not pts or pts[-1][0] != t:
+            pts.append([t, round(otc["last"], 2)])
+        state["last_otc"] = otc
+    quote = state.get("last_quote")
+    if not quote:
+        return
+    payload = {
+        "market": "tw-index",
+        "title": "台股加權指數",
+        "dataDate": f"{now:%Y-%m-%d}",
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        **_index_payload(quote, state["index_points"]),
+    }
+    if state.get("last_otc"):
+        payload["otc"] = _index_payload(state["last_otc"],
+                                        state.get("otc_points", []))
+    (DATA_DIR / "tw_index.json").write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def update_series(now: datetime, snap, state: dict):
+    """每分鐘記錄全市場個股價格與累計量（個股詳細頁的走勢/量能用）。"""
+    times = state.setdefault("times", [])
+    series = state.setdefault("series", {})
+    t = f"{now:%H:%M}"
+    if times and times[-1] == t:
+        return
+    times.append(t)
+    n = len(times)
+    seen = set()
+    for r in snap.itertuples():
+        s = series.setdefault(r.code, {"p": [None] * (n - 1),
+                                       "v": [None] * (n - 1)})
+        s["p"].append(round(r.price, 2))
+        s["v"].append(int(r.acc_shares // 1000))  # 累計張
+        seen.add(r.code)
+    for code, s in series.items():
+        if code not in seen:
+            s["p"].append(s["p"][-1] if s["p"] else None)
+            s["v"].append(s["v"][-1] if s["v"] else None)
+
+
+def write_series_json(now: datetime, state: dict):
+    (DATA_DIR / "tw_series.json").write_text(json.dumps({
+        "dataDate": f"{now:%Y-%m-%d}",
+        "times": state.get("times", []),
+        "stocks": state.get("series", {}),
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }, ensure_ascii=False), encoding="utf-8")
 
@@ -101,6 +149,8 @@ def write_stocks_json(now: datetime, snap, state: dict):
         stocks[r.code] = {
             "n": r.name, "z": r.price, "y": r.prev_close,
             "o": r.open, "h": r.high, "l": r.low,
+            "u": r.limit_up, "w": r.limit_down,
+            "bids": r.bids, "asks": r.asks,
             "chg": round((r.price / r.prev_close - 1) * 100, 2),
             "v": round(r.acc_shares / 1000),          # 張
             "a": round(r.acc_shares * r.price / 1e8, 1),  # 億（近似）
@@ -126,6 +176,7 @@ def run_cycle(mis: MisProvider, industry: dict[str, str],
     snap = snap.dropna(subset=["sector"])
 
     index_quote = mis.fetch_index_quote()
+    otc_quote = mis.fetch_index_quote("otc_o00.tw")
     history = load_history(day)
     sectors, market_chg = compute_intraday(
         snap, ref_snapshot(history, now),
@@ -145,8 +196,10 @@ def run_cycle(mis: MisProvider, industry: dict[str, str],
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }, ensure_ascii=False), encoding="utf-8")
 
-    write_index_json(now, index_quote, state)
+    write_index_json(now, index_quote, otc_quote, state)
     write_stocks_json(now, snap, state)
+    update_series(now, snap, state)
+    write_series_json(now, state)
     save_state(day, state)
 
     HIST_DIR.mkdir(parents=True, exist_ok=True)
