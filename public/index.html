@@ -150,6 +150,16 @@ const fmtLog = v => {
 };
 
 let refreshTimer = null;
+let currentData = null;   // 目前顯示中的輪動資料
+let selSector = null;     // 點選中的板塊（顯示盤中軌跡）
+
+chart.on("click", p => {
+  if (!currentData || currentData.mode !== "intraday") return;
+  const raw = p.data?.raw;
+  if (!raw) return;
+  selSector = selSector === raw.name ? null : raw.name;
+  render(currentData);
+});
 
 async function fetchJSON(name) {
   try {
@@ -173,6 +183,7 @@ function showView(market) {
 async function load(market) {
   clearInterval(refreshTimer);
   refreshTimer = null;
+  selSector = null;
   showView(market);
 
   if (market === "index") {
@@ -206,11 +217,23 @@ async function load(market) {
   render(cache[market]);
 }
 
-function render(d) {
+async function render(d) {
+  currentData = d;
   const live = d.mode === "intraday"
     ? `｜大盤 ${d.marketChg > 0 ? "+" : ""}${d.marketChg}%　🔴 即時` : "";
   document.getElementById("meta").textContent =
     `${d.title}｜${d.dataDate}${live}`;
+  document.getElementById("hint").textContent = d.mode === "intraday"
+    ? "滾輪縮放、拖曳平移｜點泡泡顯示該板塊盤中資金軌跡，再點一次取消"
+    : "滾輪縮放、拖曳平移";
+
+  // 點選板塊 → 取盤中軌跡
+  let traj = null;
+  if (d.mode === "intraday" && selSector) {
+    traj = await fetchJSON("tw_trajectory");
+    if (!traj?.sectors[selSector]) traj = null;
+  }
+  const dimmed = name => traj && name !== selSector;
 
   const isRRG = d.mode === "rrg";
   const cx = isRRG ? 100 : 0, cy = isRRG ? 100 : 0;
@@ -224,12 +247,35 @@ function render(d) {
     data: d.sectors.map(s => ({
       name: s.name, value: [tx(s.x), tx(s.y)], raw: s,
       symbolSize: 14 + 46 * Math.sqrt(s.size / maxSize),
-      itemStyle: { color: COLORS[s.phase], opacity: 0.82,
-                   borderColor: "#fff", borderWidth: 0.5 },
-      label: { show: true, position: "top", color: "#e6edf3",
+      itemStyle: { color: COLORS[s.phase], opacity: dimmed(s.name) ? 0.12 : 0.82,
+                   borderColor: "#fff", borderWidth: dimmed(s.name) ? 0 : 0.5 },
+      label: { show: !dimmed(s.name), position: "top", color: "#e6edf3",
                fontSize: 11, formatter: s.name },
     })),
   }];
+
+  // 板塊盤中軌跡（從 runner 啟動起每分鐘一點）
+  let trajTimes = null;
+  if (traj) {
+    trajTimes = traj.times;
+    const pts = traj.sectors[selSector];
+    const sec = d.sectors.find(s => s.name === selSector);
+    const col = COLORS[sec?.phase] || "#e6edf3";
+    const firstIdx = pts.findIndex(p => p != null);
+    series.push({
+      name: "traj", type: "line", data: pts, z: 6,
+      symbol: "circle", symbolSize: 4, connectNulls: true,
+      lineStyle: { color: col, width: 1.5, opacity: 0.8 },
+      itemStyle: { color: col, opacity: 0.8 },
+      markPoint: firstIdx >= 0 ? {
+        symbol: "circle", symbolSize: 9,
+        itemStyle: { color: "#e6edf3" },
+        label: { show: true, position: "left", color: "#8b949e",
+                 fontSize: 10, formatter: trajTimes[firstIdx] },
+        data: [{ coord: pts[firstIdx] }],
+      } : undefined,
+    });
+  }
 
   chart.setOption({
     backgroundColor: "transparent",
@@ -258,6 +304,11 @@ function render(d) {
       backgroundColor: "#161b22", borderColor: "#30363d",
       textStyle: { color: "#e6edf3", fontSize: 12 },
       formatter: p => {
+        if (p.seriesName === "traj") {
+          const [x, y] = p.data || [];
+          return `<b>${selSector}</b>　${trajTimes?.[p.dataIndex] ?? ""}<br>` +
+                 `相對大盤 ${x > 0 ? "+" : ""}${x}%　動能 ${y > 0 ? "+" : ""}${y}`;
+        }
         const s = p.data.raw;
         if (!s) return "";
         let html = `<b>${s.name}</b>　<span style="color:${COLORS[s.phase]}">${PHASE_TXT[s.phase]}</span><br>`;

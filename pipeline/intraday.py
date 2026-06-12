@@ -106,6 +106,32 @@ def write_index_json(now: datetime, quote: dict | None,
         json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
+def update_trajectory(now: datetime, sectors: list[dict], state: dict):
+    """每分鐘記錄各板塊在輪動圖上的座標（點泡泡看盤中軌跡用）。"""
+    t = f"{now:%H:%M}"
+    times = state.setdefault("traj_times", [])
+    traj = state.setdefault("traj", {})
+    if times and times[-1] == t:
+        return
+    times.append(t)
+    n = len(times)
+    for s in sectors:
+        a = traj.setdefault(s["name"], [None] * (n - 1))
+        a.append([s["x"], s["y"]])
+    for a in traj.values():
+        if len(a) < n:
+            a.append(a[-1])
+
+
+def write_trajectory_json(now: datetime, state: dict):
+    (DATA_DIR / "tw_trajectory.json").write_text(json.dumps({
+        "dataDate": f"{now:%Y-%m-%d}",
+        "times": state.get("traj_times", []),
+        "sectors": state.get("traj", {}),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }, ensure_ascii=False), encoding="utf-8")
+
+
 def update_series(now: datetime, snap, state: dict):
     """每分鐘記錄全市場個股價格與累計量（個股詳細頁的走勢/量能用）。"""
     times = state.setdefault("times", [])
@@ -200,6 +226,8 @@ def run_cycle(mis: MisProvider, industry: dict[str, str],
     write_stocks_json(now, snap, state)
     update_series(now, snap, state)
     write_series_json(now, state)
+    update_trajectory(now, sectors, state)
+    write_trajectory_json(now, state)
     save_state(day, state)
 
     HIST_DIR.mkdir(parents=True, exist_ok=True)
