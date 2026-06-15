@@ -320,23 +320,49 @@ async function render(d) {
         }
         const s = p.data.raw;
         if (!s) return "";
-        let html = `<b>${s.name}</b>　<span style="color:${COLORS[s.phase]}">${PHASE_TXT[s.phase]}</span><br>`;
+        const pc = COLORS[s.phase];
+        const sgn = v => v >= 0 ? `+${v}` : `${v}`;
+        const row = (label, val, color) =>
+          `<div style="display:flex;justify-content:space-between;gap:24px;margin:3px 0">` +
+          `<span style="color:#8b949e">${label}</span>` +
+          `<span style="color:${color || "#e6edf3"};font-weight:600">${val}</span></div>`;
+        let html = `<div style="min-width:220px;font-size:12px">` +
+          `<div style="font-size:15px;font-weight:700;margin-bottom:8px">${s.name}</div>`;
         if (d.mode === "intraday") {
-          html += `板塊漲跌：${s.chg > 0 ? "+" : ""}${s.chg}%（相對大盤 ${s.x > 0 ? "+" : ""}${s.x}%）<br>` +
-                  `資金動能：${s.y > 0 ? "+" : ""}${s.y} 百分點<br>` +
-                  `成交金額：${s.amount} 億（占比 ${s.size}%）`;
-          if (s.topStocks?.length) html += `<br><br><b>成交額前五</b><br>` +
-            s.topStocks.map(t =>
-              `${t.code} ${t.name}　${t.chg > 0 ? "+" : ""}${t.chg}%　${t.amount}億`).join("<br>");
+          html += row("板塊漲跌", `${sgn(s.chg)}%`, s.chg >= 0 ? "#f87171" : "#4ade80");
+          html += row("相對大盤", `${sgn(s.x)}%`, s.x >= 0 ? "#f87171" : "#4ade80");
+          html += row("資金動能", `${sgn(s.y)} 百分點`, s.y >= 0 ? "#fb923c" : "#94a3b8");
+          html += row("成交金額", `${s.amount} 億`, "#e6edf3");
+          html += row("板塊占比", `${s.size}%`, "#e6edf3");
+          if (s.topStocks?.length) {
+            html += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #30363d">` +
+              `<div style="color:#8b949e;margin-bottom:4px">成交額前五</div>`;
+            s.topStocks.forEach(t => {
+              html += `<div style="display:flex;justify-content:space-between;gap:16px;margin:2px 0">` +
+                `<span>${t.code} ${t.name}</span>` +
+                `<span style="color:${t.chg >= 0 ? "#f87171" : "#4ade80"}">${sgn(t.chg)}%</span></div>`;
+            });
+            html += `</div>`;
+          }
         } else if (d.mode === "flow") {
-          html += `近5日買賣超：${s.x} 億<br>加速度：${s.y} 億<br>近20日累計：${s.flow20} 億`;
-          if (s.topBuy?.length) html += `<br><br><b>法人買超</b><br>` +
-            s.topBuy.map(t => `${t.code} ${t.name}　+${t.amount}億`).join("<br>");
-          if (s.topSell?.length) html += `<br><b>法人賣超</b><br>` +
-            s.topSell.map(t => `${t.code} ${t.name}　${t.amount}億`).join("<br>");
+          html += row("近5日法人淨買超", `${sgn(s.x)} 億`, s.x >= 0 ? "#f87171" : "#4ade80");
+          html += row("加速度", `${sgn(s.y)} 億`, s.y >= 0 ? "#fb923c" : "#94a3b8");
+          html += row("近20日累計", `${sgn(s.flow20 ?? s.size)} 億`, (s.flow20 ?? s.size) >= 0 ? "#f87171" : "#4ade80");
+          if (s.ret5 != null) html += row("近5日漲跌", `${sgn(s.ret5)}%`, s.ret5 >= 0 ? "#f87171" : "#4ade80");
+          const stocks = [...(s.topBuy || []), ...(s.topSell || [])];
+          if (stocks.length) {
+            const codes = stocks.map(t => t.code).join("、");
+            html += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #30363d;color:#8b949e">` +
+              `代表股：${codes}</div>`;
+          }
         } else {
-          html += `RS-Ratio：${s.x}<br>RS-Momentum：${s.y}<br>近20日報酬：${s.ret20}%`;
+          html += row("RS-Ratio 相對強度", s.x, "#e6edf3");
+          html += row("RS-Momentum 相對動能", s.y, "#e6edf3");
+          html += row("近20日報酬", `${sgn(s.ret20)}%`, s.ret20 >= 0 ? "#f87171" : "#4ade80");
         }
+        html += `<div style="margin-top:8px">` +
+          `<span style="background:${pc};color:#fff;padding:2px 10px;border-radius:10px;font-size:11px">` +
+          `${PHASE_TXT[s.phase]}</span></div></div>`;
         return html;
       },
     },
