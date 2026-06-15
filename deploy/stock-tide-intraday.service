@@ -1,0 +1,17 @@
+[Unit]
+Description=Stock Tide Intraday Runner
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/stock-tide
+ExecStart=/usr/bin/python3 pipeline/intraday.py
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+Environment=TZ=Asia/Taipei
+
+[Install]
+WantedBy=multi-user.target
