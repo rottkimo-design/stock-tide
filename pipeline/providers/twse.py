@@ -108,10 +108,15 @@ class TwseProvider(FlowProvider):
         idx_total = len(fields) - 1  # 最後一欄固定是「三大法人買賣超股數」
         rows = []
         for row in data["data"]:
+            if len(row) <= idx_total:
+                continue  # 欄數不足的列跳過
             code = row[idx_code].strip()
             if len(code) != 4 or not code.isdigit():
                 continue  # 排除 ETF/權證等，只留普通股
-            net = int(row[idx_total].replace(",", ""))
+            try:
+                net = int(row[idx_total].replace(",", ""))
+            except (ValueError, AttributeError):
+                continue
             rows.append({"date": f"{d:%Y-%m-%d}", "code": code,
                          "name": row[idx_name].strip(), "net_shares": net})
         return pd.DataFrame(rows)
