@@ -249,8 +249,17 @@ async function render(d) {
       symbolSize: 14 + 46 * Math.sqrt(s.size / maxSize),
       itemStyle: { color: COLORS[s.phase], opacity: dimmed(s.name) ? 0.12 : 0.82,
                    borderColor: "#fff", borderWidth: dimmed(s.name) ? 0 : 0.5 },
-      label: { show: !dimmed(s.name), position: "top", color: "#e6edf3",
-               fontSize: 11, formatter: s.name },
+      label: { show: !dimmed(s.name), position: "inside", color: "#fff",
+               fontSize: 10, lineHeight: 16, overflow: "truncate",
+               formatter: () => {
+                 const amt = s.amount;
+                 const sign = amt >= 0 ? "+" : "";
+                 return `{name|${s.name}}\n{amt|${sign}${amt}億}`;
+               },
+               rich: {
+                 name: { fontSize: 11, color: "#fff", fontWeight: "bold" },
+                 amt:  { fontSize: 10, color: "#ffe08a" },
+               } },
     })),
   }];
 
