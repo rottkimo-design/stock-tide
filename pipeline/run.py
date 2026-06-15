@@ -52,6 +52,11 @@ def run_tw():
         "dataDate": provider.latest_date(),
         "sectors": sectors,
     })
+    names = provider.fetch_names()
+    if names:
+        out = DATA_DIR / "tw_names.json"
+        out.write_text(json.dumps(names, ensure_ascii=False), encoding="utf-8")
+        print(f"  -> {out} ({len(names)} stocks)")
 
 
 def run_us():

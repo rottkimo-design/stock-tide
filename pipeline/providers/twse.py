@@ -40,6 +40,7 @@ class TwseProvider(FlowProvider):
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         self._industry = None
         self._close = None
+        self._names: dict[str, str] = {}
         self._latest = None
 
     # ---------- public ----------
@@ -123,9 +124,16 @@ class TwseProvider(FlowProvider):
             for row in data:
                 try:
                     self._close[row["Code"]] = float(row["ClosingPrice"])
+                    if row.get("Name"):
+                        self._names[row["Code"]] = row["Name"].strip()
                 except (ValueError, KeyError):
                     continue
         return self._close
+
+    def fetch_names(self) -> dict[str, str]:
+        """全市場代號 → 股票名稱（來自 STOCK_DAY_ALL，供離線搜尋用）。"""
+        self._close_prices()  # 順帶填充 _names
+        return self._names
 
     def _industry_map(self) -> dict[str, str]:
         if self._industry is None:

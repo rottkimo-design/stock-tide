@@ -167,6 +167,15 @@ def write_series_json(now: datetime, state: dict):
     }, ensure_ascii=False), encoding="utf-8")
 
 
+def _update_names(snap):
+    """盤中快照的代號→名稱合併寫入 tw_names.json（離線搜尋用）。"""
+    f = DATA_DIR / "tw_names.json"
+    names = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    for r in snap.itertuples():
+        names[r.code] = r.name
+    f.write_text(json.dumps(names, ensure_ascii=False), encoding="utf-8")
+
+
 def write_stocks_json(now: datetime, snap, state: dict):
     """全市場個股即時報價 + 走勢 spark（自選股監控用）。"""
     spark = state["spark"]
@@ -227,6 +236,7 @@ def run_cycle(mis: MisProvider, industry: dict[str, str],
 
     write_index_json(now, index_quote, otc_quote, state)
     write_stocks_json(now, snap, state)
+    _update_names(snap)
     update_series(now, snap, state)
     write_series_json(now, state)
     update_trajectory(now, sectors, state)

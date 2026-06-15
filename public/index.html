@@ -789,13 +789,20 @@ async function renderDetail() {
   }
 }
 
+let _names = {};  // tw_names.json 離線名稱庫（代號 → 名稱）
+fetchJSON("tw_names").then(d => { if (d) _names = d; });
+
 // 代號或名稱 → [code, name] 候選清單（代號前綴或名稱包含）
 function matchStocks(q) {
-  if (!q || !stocksCache) return [];
+  if (!q) return [];
+  const live = stocksCache?.stocks || {};
+  const allCodes = new Set([...Object.keys(live), ...Object.keys(_names)]);
   const out = [];
-  for (const [code, s] of Object.entries(stocksCache.stocks)) {
-    if (code.startsWith(q) || s.n.includes(q)) {
-      out.push([code, s.n]);
+  for (const code of allCodes) {
+    const s = live[code];
+    const name = s?.n || _names[code] || code;
+    if (code.startsWith(q) || name.includes(q)) {
+      out.push([code, name]);
       if (out.length >= 8) break;
     }
   }
