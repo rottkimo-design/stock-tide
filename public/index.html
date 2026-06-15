@@ -508,9 +508,30 @@ async function renderWatch() {
   const w = loadWL();
   renderTabs(w);
   cards.innerHTML = activeCodes(w).map(code => {
-    const s = data.stocks[code];
-    if (!s) return `<div class="card"><button class="rm" data-code="${code}">✕</button>
-      <h3>${code}</h3><div class="ohlc">查無資料（僅支援上市普通股）</div></div>`;
+    const s = data?.stocks?.[code];
+    if (!s) {
+      const h = _histCache[code];
+      const name = _names[code] || code;
+      if (h) {
+        const cls = h.chg > 0 ? "up" : h.chg < 0 ? "down" : "flat";
+        const sign = h.chg > 0 ? "+" : "";
+        const color = h.chg > 0 ? "#f85149" : h.chg < 0 ? "#3fb950" : "#8b949e";
+        return `<div class="card" data-offline="${code}" draggable="true">
+          <button class="rm" data-code="${code}">✕</button>
+          <h3>${h.name}<small>${code}</small></h3>
+          <div class="price ${cls}">${h.z}<small>${sign}${h.chg}%</small></div>
+          <div class="ohlc">
+            <span>昨收 <b>${h.y}</b></span>
+            <span style="color:#8b949e;font-size:11px">月線・非即時</span>
+          </div>
+          ${sparkSVG(h.spark, h.y, color)}</div>`;
+      }
+      return `<div class="card" data-offline="${code}" draggable="true">
+        <button class="rm" data-code="${code}">✕</button>
+        <h3>${name}<small>${code}</small></h3>
+        <div class="ohlc" style="color:#8b949e;padding:16px 0">⏳ 載入月線中...</div>
+      </div>`;
+    }
     const cls = s.chg > 0 ? "up" : s.chg < 0 ? "down" : "flat";
     const sign = s.chg > 0 ? "+" : "";
     const color = s.chg > 0 ? "#f85149" : s.chg < 0 ? "#3fb950" : "#8b949e";
@@ -528,6 +549,15 @@ async function renderWatch() {
       </div>
       ${sparkSVG(s.spark, s.y, color)}</div>`;
   }).join("");
+
+  // 離線股票抓月線後重新渲染
+  const needFetch = activeCodes(w).filter(c =>
+    !data?.stocks?.[c] && !(c in _histCache) && !_histFailed.has(c));
+  if (needFetch.length) {
+    Promise.all(needFetch.map(fetchHistory)).then(results => {
+      if (results.some(r => r)) renderWatch();
+    });
+  }
 
   cards.querySelectorAll(".rm").forEach(b => b.addEventListener("click", e => {
     e.stopPropagation();
@@ -791,6 +821,36 @@ async function renderDetail() {
 
 let _names = {};  // tw_names.json 離線名稱庫（代號 → 名稱）
 fetchJSON("tw_names").then(d => { if (d) _names = d; });
+
+const _histCache = {};   // 月線快取
+const _histFailed = new Set();
+
+async function fetchHistory(code) {
+  if (code in _histCache) return _histCache[code];
+  if (_histFailed.has(code)) return null;
+  try {
+    const r = await fetch(`/api/hist/${code}.TW?interval=1d&range=1mo`);
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    const result = d?.chart?.result?.[0];
+    if (!result) throw new Error("no result");
+    const closes = result.indicators.quote[0].close.map(v => v ? +v.toFixed(2) : null);
+    const valid = closes.filter(Boolean);
+    const meta = result.meta;
+    const last = +(meta.regularMarketPrice ?? valid.at(-1)).toFixed(2);
+    const prev = +(meta.previousClose ?? valid.at(-2) ?? last).toFixed(2);
+    _histCache[code] = {
+      name: _names[code] || code,
+      z: last, y: prev,
+      chg: +((last / prev - 1) * 100).toFixed(2),
+      spark: valid,
+    };
+    return _histCache[code];
+  } catch {
+    _histFailed.add(code);
+    return null;
+  }
+}
 
 // 代號或名稱 → [code, name] 候選清單（代號前綴或名稱包含）
 function matchStocks(q) {
