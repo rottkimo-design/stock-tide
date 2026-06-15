@@ -570,6 +570,8 @@ async function renderWatch() {
       const g = w2.groups.find(g => g.name === w2.active);
       if (g) g.codes = g.codes.filter(c => c !== code);
     }
+    delete _histCache[code];
+    _histFailed.delete(code);
     saveWL(w2);
     renderWatch();
   }));
