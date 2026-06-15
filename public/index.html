@@ -249,15 +249,21 @@ async function render(d) {
       symbolSize: 14 + 46 * Math.sqrt(s.size / maxSize),
       itemStyle: { color: COLORS[s.phase], opacity: dimmed(s.name) ? 0.12 : 0.82,
                    borderColor: "#fff", borderWidth: dimmed(s.name) ? 0 : 0.5 },
-      label: { show: !dimmed(s.name), position: "inside", color: "#fff",
-               fontSize: 10, lineHeight: 16, overflow: "truncate",
+      label: { show: !dimmed(s.name), position: "top", color: "#e6edf3",
+               fontSize: 10, lineHeight: 16,
                formatter: () => {
-                 const amt = s.amount;
-                 const sign = amt >= 0 ? "+" : "";
+                 let amt, sign;
+                 if (d.mode === "intraday") {
+                   amt = s.amount; sign = "";
+                 } else if (d.mode === "flow") {
+                   amt = s.x; sign = s.x >= 0 ? "+" : "";
+                 } else {
+                   return s.name;
+                 }
                  return `{name|${s.name}}\n{amt|${sign}${amt}億}`;
                },
                rich: {
-                 name: { fontSize: 11, color: "#fff", fontWeight: "bold" },
+                 name: { fontSize: 11, color: "#e6edf3", fontWeight: "bold" },
                  amt:  { fontSize: 10, color: "#ffe08a" },
                } },
     })),
