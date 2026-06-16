@@ -23,9 +23,48 @@
   .legend span::before { content: "●"; margin-right: 4px; }
   .lg-rising::before { color: var(--rising); } .lg-rotating::before { color: var(--rotating); }
   .lg-watching::before { color: var(--watching); } .lg-ebbing::before { color: var(--ebbing); }
+  /* 主體 flex layout */
+  #main { display: flex; align-items: stretch; }
+  #phase-sidebar { width: 128px; flex-shrink: 0; display: flex; flex-direction: column;
+    gap: 8px; padding: 10px 10px 10px 12px; border-right: 1px solid var(--border); }
+  #chart-area { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   #chart { width: 100%; height: calc(100vh - 110px); min-height: 480px; }
   /* 台股慣例：紅=漲潮(流入) 綠=退潮(流出) */
-  .hint { color: var(--muted); font-size: 12px; padding: 0 20px 8px; }
+  .hint { color: var(--muted); font-size: 12px; padding: 4px 16px 6px; }
+
+  /* Phase cards in sidebar */
+  .pc { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 10px 8px; cursor: pointer; transition: border-color .15s, background .15s; user-select: none; }
+  .pc:hover { background: #1c2533; }
+  .pc.active { background: #1c2533; }
+  .pc-rising  { border-left: 3px solid var(--rising); }
+  .pc-rotating{ border-left: 3px solid var(--rotating); }
+  .pc-watching{ border-left: 3px solid var(--watching); }
+  .pc-ebbing  { border-left: 3px solid var(--ebbing); }
+  .pc-rising.active  { border-color: var(--rising); }
+  .pc-rotating.active{ border-color: var(--rotating); }
+  .pc-watching.active{ border-color: var(--watching); }
+  .pc-ebbing.active  { border-color: var(--ebbing); }
+  .pc-label { font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  .pc-count { font-size: 26px; font-weight: 700; line-height: 1; margin-bottom: 3px; }
+  .pc-rising  .pc-count { color: var(--rising); }
+  .pc-rotating.pc-count { color: var(--rotating); }
+  .pc-watching .pc-count { color: var(--watching); }
+  .pc-ebbing  .pc-count { color: var(--ebbing); }
+  .pc-sub { font-size: 10px; color: var(--muted); }
+
+  /* 2×2 quadrant nav */
+  .qnav { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin-top: 4px; }
+  .qnav-btn { border: 1px solid var(--border); border-radius: 6px; padding: 6px 4px;
+    font-size: 10px; text-align: center; cursor: pointer; background: var(--panel);
+    color: var(--muted); transition: background .15s, color .15s; user-select: none; }
+  .qnav-btn:hover { background: #1c2533; color: var(--text); }
+  .qnav-btn.active { color: #fff; }
+  .qnav-rising.active  { background: var(--rising);   border-color: var(--rising); }
+  .qnav-rotating.active{ background: var(--rotating); border-color: var(--rotating); }
+  .qnav-watching.active{ background: var(--watching); border-color: var(--watching); }
+  .qnav-ebbing.active  { background: var(--ebbing);   border-color: var(--ebbing); }
+  .qnav-divider { font-size: 10px; color: var(--muted); text-align: center; margin: 2px 0 0; }
 
   /* 自選股 */
   #watch { display: none; padding: 16px 20px; }
@@ -109,8 +148,41 @@
   <span class="lg-watching">觀望（流出趨緩）</span>
   <span class="lg-ebbing">退潮（持續流出）</span>
 </div>
-<div class="hint" id="hint" style="display:none">滾輪縮放、拖曳平移</div>
-<div id="chart"></div>
+<div id="main">
+  <div id="phase-sidebar" style="display:none">
+    <div class="pc pc-rising"  onclick="zoomToPhase('rising')">
+      <div class="pc-label">漲潮</div>
+      <div class="pc-count" id="pc-rising" style="color:var(--rising)">—</div>
+      <div class="pc-sub">資金加速流入</div>
+    </div>
+    <div class="pc pc-rotating" onclick="zoomToPhase('rotating')">
+      <div class="pc-label">輪動</div>
+      <div class="pc-count" id="pc-rotating" style="color:var(--rotating)">—</div>
+      <div class="pc-sub">流入但放緩</div>
+    </div>
+    <div class="pc pc-watching" onclick="zoomToPhase('watching')">
+      <div class="pc-label">觀望</div>
+      <div class="pc-count" id="pc-watching" style="color:var(--watching)">—</div>
+      <div class="pc-sub">資金沉寂</div>
+    </div>
+    <div class="pc pc-ebbing"  onclick="zoomToPhase('ebbing')">
+      <div class="pc-label">退潮</div>
+      <div class="pc-count" id="pc-ebbing" style="color:var(--ebbing)">—</div>
+      <div class="pc-sub">資金流出</div>
+    </div>
+    <div class="qnav-divider">快速定位</div>
+    <div class="qnav">
+      <div class="qnav-btn qnav-watching" onclick="zoomToPhase('watching')" id="qb-watching">觀望</div>
+      <div class="qnav-btn qnav-rising"   onclick="zoomToPhase('rising')"   id="qb-rising">漲潮</div>
+      <div class="qnav-btn qnav-ebbing"   onclick="zoomToPhase('ebbing')"   id="qb-ebbing">退潮</div>
+      <div class="qnav-btn qnav-rotating" onclick="zoomToPhase('rotating')" id="qb-rotating">輪動</div>
+    </div>
+  </div>
+  <div id="chart-area">
+    <div class="hint" id="hint" style="display:none">滾輪縮放、拖曳平移</div>
+    <div id="chart"></div>
+  </div>
+</div>
 <div id="watch">
   <div id="idx-cards"></div>
   <div class="wl-tabs" id="wl-tabs"></div>
@@ -217,10 +289,50 @@ const isFresh = d => d?.generatedAt &&
 function showView(market) {
   const rotation = market === "tw" || market === "us";
   document.getElementById("legend").style.display = rotation ? "flex" : "none";
+  document.getElementById("phase-sidebar").style.display = rotation ? "flex" : "none";
   document.getElementById("hint").style.display = market === "watch" ? "none" : "block";
   document.getElementById("chart").style.display = market === "watch" ? "none" : "block";
   document.getElementById("watch").style.display = market === "watch" ? "block" : "none";
   if (market !== "watch") chart.resize();
+}
+
+let _selPhase = null;
+
+function zoomToPhase(phase) {
+  if (!currentData) return;
+  // Toggle: re-click resets
+  if (_selPhase === phase) {
+    _selPhase = null;
+    chart.dispatchAction({ type: "dataZoom", dataZoomIndex: 0, start: 0, end: 100 });
+    chart.dispatchAction({ type: "dataZoom", dataZoomIndex: 1, start: 0, end: 100 });
+    _updatePhaseActive(null);
+    return;
+  }
+  _selPhase = phase;
+  const tx = currentData.mode === "flow" ? slog : (v => v);
+  const all = currentData.sectors.map(s => ({ x: tx(s.x), y: tx(s.y), p: s.phase }));
+  const sel = all.filter(s => s.p === phase);
+  if (!sel.length) return;
+  const allXs = all.map(s => s.x), allYs = all.map(s => s.y);
+  const fullXMin = Math.min(...allXs), fullXMax = Math.max(...allXs);
+  const fullYMin = Math.min(...allYs), fullYMax = Math.max(...allYs);
+  const xMin = Math.min(...sel.map(s => s.x)), xMax = Math.max(...sel.map(s => s.x));
+  const yMin = Math.min(...sel.map(s => s.y)), yMax = Math.max(...sel.map(s => s.y));
+  const xPad = Math.max((xMax - xMin) * 0.35, (fullXMax - fullXMin) * 0.04);
+  const yPad = Math.max((yMax - yMin) * 0.35, (fullYMax - fullYMin) * 0.04);
+  const pct = (v, min, max) => Math.max(0, Math.min(100, (v - min) / (max - min) * 100));
+  chart.dispatchAction({ type: "dataZoom", dataZoomIndex: 0,
+    start: pct(xMin - xPad, fullXMin, fullXMax), end: pct(xMax + xPad, fullXMin, fullXMax) });
+  chart.dispatchAction({ type: "dataZoom", dataZoomIndex: 1,
+    start: pct(yMin - yPad, fullYMin, fullYMax), end: pct(yMax + yPad, fullYMin, fullYMax) });
+  _updatePhaseActive(phase);
+}
+
+function _updatePhaseActive(phase) {
+  ["rising", "rotating", "watching", "ebbing"].forEach(p => {
+    document.querySelector(`.pc-${p}`)?.classList.toggle("active", p === phase);
+    document.getElementById(`qb-${p}`)?.classList.toggle("active", p === phase);
+  });
 }
 
 async function load(market) {
@@ -262,6 +374,16 @@ async function load(market) {
 
 async function render(d) {
   currentData = d;
+  // Reset phase selection when data changes
+  _selPhase = null;
+  _updatePhaseActive(null);
+  // Update sidebar counts
+  const cnt = { rising: 0, rotating: 0, watching: 0, ebbing: 0 };
+  d.sectors.forEach(s => { if (cnt[s.phase] !== undefined) cnt[s.phase]++; });
+  Object.entries(cnt).forEach(([p, c]) => {
+    const el = document.getElementById(`pc-${p}`);
+    if (el) el.textContent = c;
+  });
   const live = d.mode === "intraday"
     ? `｜大盤 ${d.marketChg > 0 ? "+" : ""}${d.marketChg}%　🔴 即時` : "";
   document.getElementById("meta").textContent =
