@@ -43,6 +43,8 @@
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; position: relative; }
   .card.dragging { opacity: 0.35; }
   .card.dragover { border-color: #58a6ff; }
+  .card.drop-before { box-shadow: -4px 0 0 0 #58a6ff; }
+  .card.drop-after  { box-shadow:  4px 0 0 0 #58a6ff; }
   .wl-tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
   .wl-tab { padding: 5px 14px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel);
     color: var(--muted); cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 6px; }
@@ -644,32 +646,46 @@ function renderTabs(w) {
 // ---------- 拖曳排序 ----------
 let dragCode = null;
 
+function clearDropIndicators() {
+  document.querySelectorAll(".drop-before,.drop-after").forEach(e =>
+    e.classList.remove("drop-before", "drop-after"));
+}
+
 function bindDrag(el) {
+  const getCode = () => el.dataset.detail || el.dataset.offline;
   el.addEventListener("dragstart", e => {
-    dragCode = el.dataset.detail;
+    dragCode = getCode();
     el.classList.add("dragging");
     e.dataTransfer.effectAllowed = "move";
   });
   el.addEventListener("dragend", () => {
     el.classList.remove("dragging");
+    clearDropIndicators();
     dragCode = null;
   });
   el.addEventListener("dragover", e => {
     e.preventDefault();
-    if (dragCode && dragCode !== el.dataset.detail) el.classList.add("dragover");
+    const target = getCode();
+    if (!dragCode || dragCode === target) return;
+    clearDropIndicators();
+    const mid = el.getBoundingClientRect().left + el.getBoundingClientRect().width / 2;
+    el.classList.add(e.clientX < mid ? "drop-before" : "drop-after");
   });
-  el.addEventListener("dragleave", () => el.classList.remove("dragover"));
+  el.addEventListener("dragleave", () => el.classList.remove("drop-before", "drop-after"));
   el.addEventListener("drop", e => {
     e.preventDefault();
-    el.classList.remove("dragover");
-    const target = el.dataset.detail;
+    const target = getCode();
+    const after = el.classList.contains("drop-after");
+    clearDropIndicators();
     if (!dragCode || dragCode === target) return;
     const w = loadWL();
     const list = activeCodes(w);
-    const from = list.indexOf(dragCode), to = list.indexOf(target);
-    if (from < 0 || to < 0) return;
+    const from = list.indexOf(dragCode);
+    if (from < 0) return;
     list.splice(from, 1);
-    list.splice(to, 0, dragCode);
+    const to = list.indexOf(target);
+    if (to < 0) return;
+    list.splice(after ? to + 1 : to, 0, dragCode);
     saveWL(w);
     renderWatch();
   });
