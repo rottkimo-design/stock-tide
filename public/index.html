@@ -385,6 +385,35 @@ async function render(d) {
       }, data: [],
     }]),
   }, true);
+
+  // Scale bubbles + labels with zoom
+  chart.off("datazoom");
+  chart.on("datazoom", () => {
+    const dz = chart.getOption().dataZoom || [];
+    const visX = dz[0] ? Math.max((dz[0].end - dz[0].start) / 100, 0.05) : 1;
+    const visY = dz[1] ? Math.max((dz[1].end - dz[1].start) / 100, 0.05) : visX;
+    const scale = Math.min((1 / visX + 1 / visY) / 2, 3);
+    const newData = d.sectors.map(s => ({
+      name: s.name, value: [tx(s.x), tx(s.y)], raw: s,
+      symbolSize: (14 + 46 * Math.sqrt(s.size / maxSize)) * scale,
+      itemStyle: { color: COLORS[s.phase], opacity: dimmed(s.name) ? 0.12 : 0.82,
+                   borderColor: "#fff", borderWidth: dimmed(s.name) ? 0 : 0.5 },
+      label: { show: !dimmed(s.name), position: "top", color: "#e6edf3",
+               fontSize: Math.round(10 * scale), lineHeight: Math.round(16 * scale),
+               formatter: () => {
+                 let amt, sign;
+                 if (d.mode === "intraday") { amt = s.amount; sign = ""; }
+                 else if (d.mode === "flow") { amt = s.x; sign = s.x >= 0 ? "+" : ""; }
+                 else { return s.name; }
+                 return `{name|${s.name}}\n{amt|${sign}${amt}億}`;
+               },
+               rich: {
+                 name: { fontSize: Math.round(11 * scale), color: "#e6edf3", fontWeight: "bold" },
+                 amt:  { fontSize: Math.round(10 * scale), color: "#ffe08a" },
+               } },
+    }));
+    chart.setOption({ series: [{ data: newData }] });
+  });
 }
 
 // ---------- 大盤指數 ----------
