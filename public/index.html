@@ -154,6 +154,31 @@ const fmtLog = v => {
 let refreshTimer = null;
 let currentData = null;   // 目前顯示中的輪動資料
 let selSector = null;     // 點選中的板塊（顯示盤中軌跡）
+let _cs = null;           // chart state for hover handler
+
+function buildItem(s, d, tx, maxSize, dimFn, scale) {
+  const base = 18 + 82 * Math.sqrt(s.size / maxSize);
+  return {
+    name: s.name, value: [tx(s.x), tx(s.y)], raw: s,
+    symbolSize: base * scale,
+    itemStyle: { color: COLORS[s.phase], opacity: dimFn(s.name) ? 0.12 : 0.82,
+                 borderColor: "rgba(255,255,255,0.4)", borderWidth: dimFn(s.name) ? 0 : 1 },
+    label: { show: !dimFn(s.name), position: "inside", color: "#fff",
+             overflow: "truncate",
+             fontSize: Math.round(11 * scale), lineHeight: Math.round(16 * scale),
+             formatter: () => {
+               let amt, sign;
+               if (d.mode === "intraday") { amt = s.amount; sign = ""; }
+               else if (d.mode === "flow") { amt = s.x; sign = s.x >= 0 ? "+" : ""; }
+               else { return s.name; }
+               return `{name|${s.name}}\n{amt|${sign}${amt}億}`;
+             },
+             rich: {
+               name: { fontSize: Math.round(11 * scale), color: "#fff", fontWeight: "bold" },
+               amt:  { fontSize: Math.round(10 * scale), color: "#ffe08a" },
+             } },
+  };
+}
 
 chart.on("click", p => {
   if (!currentData || currentData.mode !== "intraday") return;
@@ -161,6 +186,22 @@ chart.on("click", p => {
   if (!raw) return;
   selSector = selSector === raw.name ? null : raw.name;
   render(currentData);
+});
+
+// Hover → bring bubble to front (move to end of data array)
+chart.on("mouseover", { seriesIndex: 0 }, p => {
+  if (!_cs || !p.name) return;
+  const { d, tx, maxSize, dimFn, scale } = _cs;
+  const all = [...d.sectors];
+  const idx = all.findIndex(s => s.name === p.name);
+  if (idx < 0 || idx === all.length - 1) return;
+  all.push(all.splice(idx, 1)[0]);
+  chart.setOption({ series: [{ data: all.map(s => buildItem(s, d, tx, maxSize, dimFn, scale)) }] });
+});
+chart.on("mouseout", { seriesIndex: 0 }, () => {
+  if (!_cs) return;
+  const { d, tx, maxSize, dimFn, scale } = _cs;
+  chart.setOption({ series: [{ data: d.sectors.map(s => buildItem(s, d, tx, maxSize, dimFn, scale)) }] });
 });
 
 async function fetchJSON(name) {
@@ -243,32 +284,11 @@ async function render(d) {
   const sizes = d.sectors.map(s => s.size);
   const maxSize = Math.max(...sizes, 1);
 
+  _cs = { d, tx, maxSize, dimFn: dimmed, scale: 1 };
   const series = [{
     type: "scatter",
     labelLayout: { hideOverlap: true },
-    data: d.sectors.map(s => ({
-      name: s.name, value: [tx(s.x), tx(s.y)], raw: s,
-      symbolSize: 14 + 46 * Math.sqrt(s.size / maxSize),
-      itemStyle: { color: COLORS[s.phase], opacity: dimmed(s.name) ? 0.12 : 0.82,
-                   borderColor: "#fff", borderWidth: dimmed(s.name) ? 0 : 0.5 },
-      label: { show: !dimmed(s.name), position: "top", color: "#e6edf3",
-               fontSize: 10, lineHeight: 16,
-               formatter: () => {
-                 let amt, sign;
-                 if (d.mode === "intraday") {
-                   amt = s.amount; sign = "";
-                 } else if (d.mode === "flow") {
-                   amt = s.x; sign = s.x >= 0 ? "+" : "";
-                 } else {
-                   return s.name;
-                 }
-                 return `{name|${s.name}}\n{amt|${sign}${amt}億}`;
-               },
-               rich: {
-                 name: { fontSize: 11, color: "#e6edf3", fontWeight: "bold" },
-                 amt:  { fontSize: 10, color: "#ffe08a" },
-               } },
-    })),
+    data: d.sectors.map(s => buildItem(s, d, tx, maxSize, dimmed, 1)),
   }];
 
   // 板塊盤中軌跡（從 runner 啟動起每分鐘一點）
@@ -389,30 +409,14 @@ async function render(d) {
   // Scale bubbles + labels with zoom
   chart.off("datazoom");
   chart.on("datazoom", () => {
+    if (!_cs) return;
     const dz = chart.getOption().dataZoom || [];
     const visX = dz[0] ? Math.max((dz[0].end - dz[0].start) / 100, 0.05) : 1;
     const visY = dz[1] ? Math.max((dz[1].end - dz[1].start) / 100, 0.05) : visX;
     const scale = Math.min((1 / visX + 1 / visY) / 2, 3);
-    const newData = d.sectors.map(s => ({
-      name: s.name, value: [tx(s.x), tx(s.y)], raw: s,
-      symbolSize: (14 + 46 * Math.sqrt(s.size / maxSize)) * scale,
-      itemStyle: { color: COLORS[s.phase], opacity: dimmed(s.name) ? 0.12 : 0.82,
-                   borderColor: "#fff", borderWidth: dimmed(s.name) ? 0 : 0.5 },
-      label: { show: !dimmed(s.name), position: "top", color: "#e6edf3",
-               fontSize: Math.round(10 * scale), lineHeight: Math.round(16 * scale),
-               formatter: () => {
-                 let amt, sign;
-                 if (d.mode === "intraday") { amt = s.amount; sign = ""; }
-                 else if (d.mode === "flow") { amt = s.x; sign = s.x >= 0 ? "+" : ""; }
-                 else { return s.name; }
-                 return `{name|${s.name}}\n{amt|${sign}${amt}億}`;
-               },
-               rich: {
-                 name: { fontSize: Math.round(11 * scale), color: "#e6edf3", fontWeight: "bold" },
-                 amt:  { fontSize: Math.round(10 * scale), color: "#ffe08a" },
-               } },
-    }));
-    chart.setOption({ series: [{ data: newData }] });
+    _cs.scale = scale;
+    const { d: cd, tx: ctx, maxSize: cms, dimFn } = _cs;
+    chart.setOption({ series: [{ data: cd.sectors.map(s => buildItem(s, cd, ctx, cms, dimFn, scale)) }] });
   });
 }
 
